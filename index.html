@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>3D Stylus Avatar Studio</title>
+    <title>Interactive 3D Avatar Park</title>
     <style>
         :root {
             --bg-color: #0f1115;
             --panel-bg: #1a1d24;
-            --accent: #ff4a6b;
+            --accent: #4a9eff;
             --text: #ffffff;
         }
         body {
@@ -32,80 +32,46 @@
         }
         h1 { font-size: 1.5rem; margin: 0; color: var(--accent); }
         h2 { font-size: 1.1rem; margin: 0; border-bottom: 1px solid #333; padding-bottom: 5px; }
-        
         .btn {
-            background: #2a2e38;
-            color: white;
-            border: 1px solid #444;
-            padding: 10px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: bold;
-            transition: 0.2s;
-            text-align: center;
+            background: #2a2e38; color: white; border: 1px solid #444;
+            padding: 10px; border-radius: 6px; cursor: pointer; font-weight: bold;
+            transition: 0.2s; text-align: center;
         }
         .btn:hover { background: #353a45; }
         .btn.recording { background: var(--accent); border-color: var(--accent); }
-        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .status { font-size: 0.8rem; color: #888; text-align: center; margin-top: 5px; }
 
         #stage-container {
-            flex: 1;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            background: #000;
+            flex: 1; display: flex; justify-content: center; align-items: center;
+            position: relative; background: #000;
         }
         #viewport-wrapper {
-            position: relative;
-            width: 100%;
-            height: 100%;
+            position: relative; width: 100%; height: 100%;
             max-width: calc(100vh * 9 / 16);
-            display: flex;
-            justify-content: center;
-            align-items: center;
         }
         #three-canvas {
-            position: absolute;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            cursor: crosshair;
-            touch-action: none;
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            cursor: pointer; touch-action: none;
         }
-
-        /* Startup Overlay */
-        #startup-overlay {
-            position: absolute;
-            top: 0; left: 0; right: 0; bottom: 0;
-            background: rgba(0,0,0,0.9);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 100;
-            flex-direction: column;
-            gap: 20px;
-            text-align: center;
-            padding: 20px;
+        #instruction-text {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.7); padding: 10px 20px; border-radius: 20px;
+            font-size: 0.9rem; pointer-events: none; z-index: 10;
         }
-        .hidden { display: none !important; }
-        .status { font-size: 0.8rem; color: #888; text-align: center; }
     </style>
 </head>
 <body>
 
     <div id="sidebar">
         <div>
-            <h1>Avatar Studio</h1>
-            <p style="font-size: 0.8rem; color: #aaa; margin: 5px 0 0 0;">Stylus-driven 3D IK & Lip-Sync</p>
+            <h1>Avatar Park</h1>
+            <p style="font-size: 0.8rem; color: #aaa; margin: 5px 0 0 0;">Touch Interactive 3D Models</p>
         </div>
 
         <div>
-            <h2>Session Status</h2>
-            <div id="cam-status" class="status">Camera: Off</div>
-            <div id="mic-status" class="status">Mic: Off</div>
+            <h2>Avatar Status</h2>
             <div id="model-status" class="status">Avatar: Loading...</div>
+            <div id="touch-status" class="status">Touch: Idle</div>
         </div>
 
         <div>
@@ -115,33 +81,26 @@
         </div>
 
         <div>
-            <h2>Canvas Tools</h2>
-            <button id="clear-btn" class="btn">Clear Drawing</button>
+            <h2>Controls</h2>
+            <button id="reset-btn" class="btn">Reset Pose</button>
         </div>
         
         <div style="margin-top: auto; font-size: 0.7rem; color: #555;">
-            Libraries: Three.js, @pixiv/three-vrm, Perfect-Freehand, RecordRTC
+            To use your own model: <br>
+            1. Put model.vrm in folder<br>
+            2. Change modelUrl variable
         </div>
     </div>
 
     <div id="stage-container">
         <div id="viewport-wrapper">
-            <!-- Single unified WebGL Canvas -->
             <canvas id="three-canvas"></canvas>
-            
-            <!-- Startup Permissions Overlay -->
-            <div id="startup-overlay">
-                <h2>Welcome to Avatar Studio</h2>
-                <p>To begin, please enable your Camera and Microphone.</p>
-                <button id="start-session-btn" class="btn" style="background: var(--accent); border-color: var(--accent);">Enable Camera & Mic</button>
-            </div>
+            <div id="instruction-text">Tap the Avatar's Head, Body, or Hand!</div>
         </div>
     </div>
 
-    <!-- External Libraries -->
     <script src="https://cdn.jsdelivr.net/npm/recordrtc@5.6.2/RecordRTC.min.js"></script>
     
-    <!-- Correct Import Map for Three.js -->
     <script type="importmap">
     {
       "imports": {
@@ -153,73 +112,56 @@
 
     <script type="module">
         import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
         import { VRMLoaderPlugin, VRMUtils } from 'https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3.3.0/+esm';
-        import { getStroke } from 'https://cdn.jsdelivr.net/npm/perfect-freehand@1.2.2/+esm';
 
-        // --- DOM Elements ---
+        // --- Configuration ---
+        // You can replace this URL with a local file like './my-avatar.vrm'
+        const modelUrl = 'https://cdn.jsdelivr.net/gh/pixiv/three-vrm/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm';
+
         const threeCanvas = document.getElementById('three-canvas');
-        const micBtn = document.getElementById('mic-btn');
         const recordBtn = document.getElementById('record-btn');
-        const clearBtn = document.getElementById('clear-btn');
+        const resetBtn = document.getElementById('reset-btn');
         const wrapper = document.getElementById('viewport-wrapper');
-        const startSessionBtn = document.getElementById('start-session-btn');
-        const startupOverlay = document.getElementById('startup-overlay');
 
-        // --- State Variables ---
         let vrm = null;
-        let currentStroke = [];
-        let allStrokes = [];
-        let isDrawing = false;
-        let audioContext, analyser, micStream, videoStream, recRecorder;
         let isRecording = false;
-        let videoTexture, drawTexture;
-        let modelLoaded = false;
-
-        // Hidden canvas for 2D drawing (will be used as a texture in 3D)
-        const drawCanvas = document.createElement('canvas');
-        drawCanvas.width = 1080;
-        drawCanvas.height = 1920;
-        const drawCtx = drawCanvas.getContext('2d');
-        drawCtx.fillStyle = '#ffffff';
-        drawCtx.fillRect(0, 0, drawCanvas.width, drawCanvas.height);
+        let recRecorder;
+        let currentAction = 'idle';
+        let actionTimer = 0;
 
         // --- Three.js Setup ---
         const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x1a1d24);
+
         const camera = new THREE.PerspectiveCamera(30, 9/16, 0.1, 100);
-        camera.position.set(0, 1.35, 2.5);
-        camera.lookAt(0, 1.2, 0);
+        camera.position.set(0, 1.3, 2.5);
 
         const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true, preserveDrawingBuffer: true });
         renderer.setPixelRatio(window.devicePixelRatio);
         renderer.outputColorSpace = THREE.SRGBColorSpace;
-        renderer.autoClear = false; // We will manually clear to composite layers
 
-        // Lighting for MToon Shader
+        // Lighting
         const light = new THREE.DirectionalLight(0xffffff, 1.2);
         light.position.set(1, 1.5, 1).normalize();
         scene.add(light);
         scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-        // --- 2D Drawing Texture Plane ---
-        // This plane floats in front of the camera and displays the 2D drawing
-        const drawMaterial = new THREE.MeshBasicMaterial({ map: null, transparent: true, opacity: 0.6 });
-        drawTexture = new THREE.CanvasTexture(drawCanvas);
-        drawTexture.minFilter = THREE.LinearFilter;
-        drawMaterial.map = drawTexture;
-        
-        const drawPlaneGeometry = new THREE.PlaneGeometry(1.8, 3.2); // Matches 9:16 aspect
-        const drawPlane = new THREE.Mesh(drawPlaneGeometry, drawMaterial);
-        drawPlane.position.z = -0.5; // Slightly in front of avatar
-        camera.add(drawPlane);
-        scene.add(camera); // Add camera to scene so the plane renders relative to view
+        // Controls (Orbit camera)
+        const controls = new OrbitControls(camera, threeCanvas);
+        controls.target.set(0, 1.2, 0);
+        controls.enablePan = false;
+        controls.minDistance = 1.5;
+        controls.maxDistance = 4;
+        controls.update();
 
         // --- VRM Avatar Loading ---
         const loader = new GLTFLoader();
         loader.register((parser) => new VRMLoaderPlugin(parser));
         
         loader.load(
-            'https://cdn.jsdelivr.net/gh/pixiv/three-vrm/packages/three-vrm/examples/models/VRM1_Constraint_Twist_Sample.vrm',
+            modelUrl,
             (gltf) => {
                 vrm = gltf.userData.vrm;
                 VRMUtils.removeUnnecessaryVertices(gltf.scene);
@@ -227,157 +169,85 @@
                 scene.add(vrm.scene);
                 vrm.humanoid.resetNormalizedPose();
                 
-                modelLoaded = true;
                 document.getElementById('model-status').innerText = "Avatar: Ready";
-                checkReadyState();
+                recordBtn.disabled = false;
             },
             (progress) => console.log('Loading model...', progress),
             (error) => console.error('Error loading VRM:', error)
         );
 
-        // --- Resize Logic ---
         function resizeCanvases() {
             const rect = wrapper.getBoundingClientRect();
             renderer.setSize(rect.width, rect.height, false);
+            camera.aspect = rect.width / rect.height;
+            camera.updateProjectionMatrix();
         }
         window.addEventListener('resize', resizeCanvases);
         resizeCanvases();
 
-        // --- Drawing Input ---
-        function getPointerCoords(e) {
-            const rect = threeCanvas.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * drawCanvas.width;
-            const y = ((e.clientY - rect.top) / rect.height) * drawCanvas.height;
-            return { x, y };
-        }
-
-        threeCanvas.addEventListener('pointerdown', (e) => {
-            if (startupOverlay.classList.contains('hidden') === false) return;
-            isDrawing = true;
-            const { x, y } = getPointerCoords(e);
-            currentStroke = [{ x, y, pressure: e.pressure > 0 ? e.pressure : 0.5 }];
-            updateArmIK(e);
-        });
-
-        threeCanvas.addEventListener('pointermove', (e) => {
-            if (!isDrawing) return;
-            const { x, y } = getPointerCoords(e);
-            currentStroke.push({ x, y, pressure: e.pressure > 0 ? e.pressure : 0.5 });
-            renderStrokes();
-            updateArmIK(e);
-        });
-
-        threeCanvas.addEventListener('pointerup', () => {
-            if (isDrawing && currentStroke.length > 0) allStrokes.push(currentStroke);
-            isDrawing = false;
-            currentStroke = [];
-        });
-
-        function renderStrokes() {
-            drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
-            
-            const renderStroke = (stroke) => {
-                const outline = getStroke(stroke, {
-                    size: 20,
-                    thinning: 0.8,
-                    smoothing: 0.5,
-                    streamline: 0.5
-                });
-                if (outline.length === 0) return;
-                drawCtx.beginPath();
-                drawCtx.moveTo(outline[0][0], outline[0][1]);
-                for (let i = 1; i < outline.length; i++) {
-                    drawCtx.lineTo(outline[i][0], outline[i][1]);
-                }
-                drawCtx.closePath();
-                drawCtx.fillStyle = '#ff4a6b';
-                drawCtx.fill();
-            };
-
-            allStrokes.forEach(renderStroke);
-            if (isDrawing) renderStroke(currentStroke);
-            drawTexture.needsUpdate = true; // Push 2D updates to 3D plane
-        }
-
-        // --- Kinematic IK Engine ---
+        // --- Touch Interactivity (Raycaster) ---
         const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-        const targetWorldPos = new THREE.Vector3();
-        const drawingPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -0.5);
+        const pointer = new THREE.Vector2();
 
-        function updateArmIK(e) {
+        threeCanvas.addEventListener('pointerdown', (event) => {
+            if (!vrm) return;
+
             const rect = threeCanvas.getBoundingClientRect();
-            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-            
-            raycaster.setFromCamera(mouse, camera);
-            if (raycaster.ray.intersectPlane(drawingPlane, targetWorldPos)) {
-                // Target acquired
-            }
-        }
+            pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+            pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
 
-        // --- Simple IK Bone Alignment ---
-        const _v3a = new THREE.Vector3();
-        const _v3b = new THREE.Vector3();
-        const _q = new THREE.Quaternion();
-        const _parentQ = new THREE.Quaternion();
+            raycaster.setFromCamera(pointer, camera);
+            const intersects = raycaster.intersectObject(vrm.scene, true);
 
-        function pointBoneAt(bone, target) {
-            if (!bone) return;
-            const bonePos = bone.getWorldPosition(new THREE.Vector3());
-            _v3a.subVectors(target, bonePos).normalize();
-            _v3b.set(0, 1, 0);
-            _q.setFromUnitVectors(_v3b, _v3a);
-            if (bone.parent) {
-                bone.parent.getWorldQuaternion(_parentQ).invert();
-                _q.premultiply(_parentQ);
-            }
-            bone.quaternion.slerp(_q, 0.15);
-        }
-
-        // --- Startup Permissions Logic ---
-        let micReady = false;
-        let camReady = false;
-
-        function checkReadyState() {
-            if (micReady && camReady && modelLoaded) {
-                recordBtn.disabled = false;
-            }
-        }
-
-        startSessionBtn.addEventListener('click', async () => {
-            try {
-                // Request both at the same time
-                videoStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+            if (intersects.length > 0) {
+                // Get the first object hit and trace it back to its bone
+                let hitObject = intersects[0].object;
+                let boneName = hitObject.name; 
                 
-                // Setup Camera Background
-                const video = document.createElement('video');
-                video.srcObject = videoStream;
-                video.muted = true;
-                video.play();
-                videoTexture = new THREE.VideoTexture(video);
-                scene.background = videoTexture; // Set as 3D background
+                // Traverse up to find the actual bone name if it's a skinned mesh
+                while(hitObject.parent && !hitObject.isBone) {
+                    hitObject = hitObject.parent;
+                    if(hitObject.name && hitObject.name.includes('Left') || hitObject.name.includes('Right') || hitObject.name.includes('Head') || hitObject.name.includes('Spine')) {
+                        boneName = hitObject.name;
+                        break;
+                    }
+                }
 
-                // Setup Microphone Audio
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                const source = audioContext.createMediaStreamSource(videoStream);
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 256;
-                source.connect(analyser);
-                
-                camReady = true;
-                micReady = true;
-                document.getElementById('cam-status').innerText = "Camera: Active";
-                document.getElementById('mic-status').innerText = "Mic: Active";
-                
-                startupOverlay.classList.add('hidden');
-                checkReadyState();
-            } catch (err) {
-                alert("Permissions denied. Please allow Camera and Mic to use this app.");
+                handleTouch(boneName);
             }
         });
 
-        // --- Vertical Clip Exporter ---
+        function handleTouch(boneName) {
+            actionTimer = 0; // Reset timer for new action
+            
+            if (boneName.includes('Head')) {
+                currentAction = 'nod';
+                document.getElementById('touch-status').innerText = "Touched: Head (Happy)";
+                vrm.expressionManager.setValue('happy', 1.0);
+            } else if (boneName.includes('Hand')) {
+                currentAction = 'wave';
+                document.getElementById('touch-status').innerText = "Touched: Hand (Wave)";
+                vrm.expressionManager.setValue('surprised', 1.0);
+            } else {
+                currentAction = 'jump';
+                document.getElementById('touch-status').innerText = "Touched: Body (Jump)";
+                vrm.expressionManager.setValue('surprised', 1.0);
+            }
+        }
+
+        // Reset Button
+        resetBtn.addEventListener('click', () => {
+            currentAction = 'idle';
+            actionTimer = 0;
+            if (vrm) {
+                vrm.expressionManager.setValue('happy', 0);
+                vrm.expressionManager.setValue('surprised', 0);
+                vrm.humanoid.resetNormalizedPose();
+            }
+            document.getElementById('touch-status').innerText = "Touch: Idle";
+        });
+
+        // --- Video Export ---
         recordBtn.addEventListener('click', () => {
             if (!isRecording) {
                 isRecording = true;
@@ -410,44 +280,53 @@
             }
         });
 
-        clearBtn.addEventListener('click', () => {
-            allStrokes = [];
-            currentStroke = [];
-            renderStrokes();
-        });
-
         // --- Animation Loop ---
-        let previousVolume = 0;
         function animate() {
             requestAnimationFrame(animate);
+            controls.update();
             
-            renderer.clear();
-            renderer.render(scene, camera);
-            
-            if (!vrm) return;
-
-            // Audio Lip-Sync
-            if (analyser) {
-                const dataArray = new Uint8Array(analyser.frequencyBinCount);
-                analyser.getByteFrequencyData(dataArray);
-                let sum = 0;
-                for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
-                let avg = sum / dataArray.length / 100;
-                avg = Math.min(avg, 1.0);
-                previousVolume = previousVolume * 0.8 + avg * 0.2;
-                vrm.expressionManager.setValue('aa', previousVolume);
+            if (!vrm) {
+                renderer.render(scene, camera);
+                return;
             }
 
-            // Arm IK
-            const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
-            const rightLowerArm = vrm.humanoid.getNormalizedBoneNode('rightLowerArm');
-            const rightHand = vrm.humanoid.getNormalizedBoneNode('rightHand');
+            actionTimer += 0.05;
 
-            if (rightUpperArm) pointBoneAt(rightUpperArm, targetWorldPos);
-            if (rightLowerArm) pointBoneAt(rightLowerArm, targetWorldPos);
-            if (rightHand) pointBoneAt(rightHand, targetWorldPos);
+            // Procedural Animations
+            const hips = vrm.humanoid.getNormalizedBoneNode('hips');
+            const head = vrm.humanoid.getNormalizedBoneNode('head');
+            const rightUpperArm = vrm.humanoid.getNormalizedBoneNode('rightUpperArm');
+
+            // Default idle state (reset slightly)
+            if (currentAction === 'idle') {
+                if (hips) hips.position.y = THREE.MathUtils.lerp(hips.position.y, 0, 0.1);
+                if (head) head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, 0, 0.1);
+                if (rightUpperArm) rightUpperArm.rotation.z = THREE.MathUtils.lerp(rightUpperArm.rotation.z, 0, 0.1);
+            }
+            // Nod animation
+            else if (currentAction === 'nod') {
+                if (head) head.rotation.x = Math.sin(actionTimer * 5) * 0.3;
+                if (hips) hips.position.y = THREE.MathUtils.lerp(hips.position.y, 0, 0.1);
+                if (actionTimer > 3) resetBtn.click(); // Auto reset after 3 secs
+            }
+            // Wave animation
+            else if (currentAction === 'wave') {
+                if (rightUpperArm) {
+                    rightUpperArm.rotation.z = -1.5; // Raise arm
+                    if (vrm.humanoid.getNormalizedBoneNode('rightLowerArm')) {
+                        vrm.humanoid.getNormalizedBoneNode('rightLowerArm').rotation.y = Math.sin(actionTimer * 8) * 0.5;
+                    }
+                }
+                if (actionTimer > 3) resetBtn.click();
+            }
+            // Jump animation
+            else if (currentAction === 'jump') {
+                if (hips) hips.position.y = Math.abs(Math.sin(actionTimer * 3)) * 0.3;
+                if (actionTimer > 2) resetBtn.click();
+            }
 
             vrm.update(1/60);
+            renderer.render(scene, camera);
         }
         animate();
 
