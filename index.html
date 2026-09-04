@@ -3,17 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Hand Manipulator</title>
+    <title>3D Dual-Hand Manipulator</title>
     <style>
-        body { margin: 0; background: #050505; overflow: hidden; font-family: sans-serif; color: white; }
-        /* Video is hidden but still runs for tracking */
-        #video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; z-index: -1; }
-        #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; }
+        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; color: white; }
+        #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); z-index: 0; }
+        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+        #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         
         #ui-overlay {
             position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.6); padding: 15px 25px; border-radius: 30px;
-            text-align: center; z-index: 10; border: 1px solid rgba(255,255,255,0.2);
+            background: rgba(0,0,0,0.7); padding: 15px 25px; border-radius: 30px;
+            text-align: center; z-index: 10; border: 1px solid rgba(255,255,255,0.3);
             backdrop-filter: blur(5px);
         }
         #status { font-size: 14px; font-weight: bold; color: #4a9eff; }
@@ -27,19 +27,22 @@
 <body>
     <div id="loader">
         <div class="spinner"></div>
-        <div>Initializing Camera & Tracking...</div>
+        <div>Initializing Precision Tracking...</div>
     </div>
 
     <video id="video" autoplay playsinline muted></video>
+    <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
     <div id="ui-overlay">
-        <div id="status">SHOW HAND TO START</div>
-        <div id="gesture">PALM: CHANGE SHAPE | PINCH: ROTATE & SCALE</div>
+        <div id="status">SHOW HANDS TO START</div>
+        <div id="gesture">2 HANDS: SCALE | FIST+HAND: ROTATE</div>
     </div>
 
-    <!-- MediaPipe Hands -->
+    <!-- MediaPipe -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
 
     <!-- Three.js -->
     <script type="importmap">
@@ -55,6 +58,8 @@
         import * as THREE from 'three';
 
         const video = document.getElementById('video');
+        const overlayCanvas = document.getElementById('overlay-canvas');
+        const overlayCtx = overlayCanvas.getContext('2d');
         const threeCanvas = document.getElementById('three-canvas');
         const loader = document.getElementById('loader');
         const statusDiv = document.getElementById('status');
@@ -70,17 +75,17 @@
         renderer.setPixelRatio(window.devicePixelRatio);
 
         // Lighting
-        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
         dirLight.position.set(2, 2, 3);
         scene.add(dirLight);
 
-        // --- 3D Primitives ---
+        // Primitives
         const materials = [
-            new THREE.MeshStandardMaterial({ color: 0xff4a6b, roughness: 0.4, metalness: 0.3 }),
-            new THREE.MeshStandardMaterial({ color: 0x4a9eff, roughness: 0.4, metalness: 0.3 }),
-            new THREE.MeshStandardMaterial({ color: 0xffdd00, roughness: 0.4, metalness: 0.3 }),
-            new THREE.MeshStandardMaterial({ color: 0x00ffaa, roughness: 0.4, metalness: 0.3 })
+            new THREE.MeshStandardMaterial({ color: 0xff4a6b, roughness: 0.3, metalness: 0.5 }),
+            new THREE.MeshStandardMaterial({ color: 0x4a9eff, roughness: 0.3, metalness: 0.5 }),
+            new THREE.MeshStandardMaterial({ color: 0xffdd00, roughness: 0.3, metalness: 0.5 }),
+            new THREE.MeshStandardMaterial({ color: 0x00ffaa, roughness: 0.3, metalness: 0.5 })
         ];
         const geometries = [
             new THREE.BoxGeometry(1.5, 1.5, 1.5),
@@ -90,174 +95,162 @@
         ];
         
         let activeMesh = new THREE.Mesh(geometries[0], materials[0]);
-        activeMesh.position.set(2, 0, 0); // Place to the side so hand skeleton is visible
         scene.add(activeMesh);
 
-        // --- 3D Hand Skeleton Markers ---
-        const handGroup = new THREE.Group();
-        scene.add(handGroup);
-
-        const jointGeo = new THREE.SphereGeometry(0.08, 16, 16);
-        const jointMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
-        const joints = [];
-        for(let i=0; i<21; i++) {
-            joints.push(new THREE.Mesh(jointGeo, jointMat));
-            handGroup.add(joints[i]);
-        }
-
-        // 3D Lines for skeleton
-        const handConnections = [
-            [0,1],[1,2],[2,3],[3,4], // thumb
-            [0,5],[5,6],[6,7],[7,8], // index
-            [5,9],[9,10],[10,11],[11,12], // middle
-            [9,13],[13,14],[14,15],[15,16], // ring
-            [13,17],[17,18],[18,19],[19,20], // pinky
-            [0,17] // palm base
-        ];
-        const linePositions = new Float32Array(handConnections.length * 2 * 3);
-        const lineGeometry = new THREE.BufferGeometry();
-        lineGeometry.setAttribute('position', new THREE.BufferAttribute(linePositions, 3));
-        const lineMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
-        const handLines = new THREE.LineSegments(lineGeometry, lineMaterial);
-        handGroup.add(handLines);
-
-        // --- Hand Tracking Logic ---
-        let hands;
+        // --- Smoothing State Variables ---
+        let targetScale = 1.0;
+        let targetRotX = 0.0;
+        let targetRotY = 0.0;
+        let targetRotZ = 0.0;
         let palmHoldStart = 0;
         let currentShapeIndex = 0;
 
-        // MediaPipe to 3D Space Mapping
-        function mapLandmark(lm) {
-            // Flip X for mirror effect, scale up, and offset to center
-            const x = (0.5 - lm.x) * 6;
-            const y = (0.5 - lm.y) * 6;
-            const z = -lm.z * 6;
-            return new THREE.Vector3(x, y, z);
-        }
-
+        // --- Hand Tracking Logic ---
+        let hands;
         function initHands() {
             hands = new Hands({
                 locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
             });
             hands.setOptions({
-                maxNumHands: 1,
-                modelComplexity: 0,
-                minDetectionConfidence: 0.6,
-                minTrackingConfidence: 0.5
+                maxNumHands: 2,
+                modelComplexity: 1, // Higher complexity for precision
+                minDetectionConfidence: 0.7,
+                minTrackingConfidence: 0.6
             });
             hands.onResults(onResults);
-            startCamera();
+
+            const cameraUtil = new Camera(video, {
+                onFrame: async () => { await hands.send({ image: video }); },
+                width: 1280,
+                height: 720
+            });
+            cameraUtil.start().then(() => { loader.style.display = 'none'; });
         }
 
-        async function startCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } 
-                });
-                video.srcObject = stream;
-                await video.play();
-                loader.style.display = 'none';
-                processFrame();
-            } catch (err) {
-                alert("Camera access denied or failed.");
-            }
+        // Helper: Gesture Detection
+        function isFist(lm) {
+            // Check if fingers are curled towards palm
+            return lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y;
         }
-
-        async function processFrame() {
-            if (video.readyState >= 2) {
-                await hands.send({ image: video });
-            }
-            requestAnimationFrame(processFrame);
+        function isPalm(lm) {
+            return lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y < lm[14].y && lm[20].y < lm[18].y;
         }
 
         function onResults(results) {
-            let handDetected = false;
+            // 1. Draw MediaPipe Native Overlay
+            overlayCanvas.width = window.innerWidth;
+            overlayCanvas.height = window.innerHeight;
+            overlayCtx.save();
+            overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            
+            // Mirror the drawing context to match the mirrored video
+            overlayCtx.translate(window.innerWidth, 0);
+            overlayCtx.scale(-1, 1);
 
+            if (results.multiHandLandmarks) {
+                for (const landmarks of results.multiHandLandmarks) {
+                    drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 4 });
+                    drawLandmarks(overlayCtx, landmarks, { color: '#FF0000', lineWidth: 2, radius: 4 });
+                }
+            }
+            overlayCtx.restore();
+
+            // 2. 3D Manipulation Logic
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
-                handDetected = true;
-                const lm = results.multiHandLandmarks[0];
+                const handsArr = results.multiHandLandmarks;
                 
-                // Update 3D Joints
-                const positions = [];
-                for(let i=0; i<21; i++) {
-                    const pos = mapLandmark(lm[i]);
-                    joints[i].position.copy(pos);
-                    positions.push(pos);
-                }
+                // --- Scenario 1: Two Hands Visible (Scaling) ---
+                if (handsArr.length === 2) {
+                    palmHoldStart = 0; // Cancel shape change
+                    const h1 = handsArr[0];
+                    const h2 = handsArr[1];
 
-                // Update 3D Lines
-                let idx = 0;
-                for(let i=0; i<handConnections.length; i++) {
-                    const [a, b] = handConnections[i];
-                    linePositions[idx++] = positions[a].x; linePositions[idx++] = positions[a].y; linePositions[idx++] = positions[a].z;
-                    linePositions[idx++] = positions[b].x; linePositions[idx++] = positions[b].y; linePositions[idx++] = positions[b].z;
-                }
-                handLines.geometry.attributes.position.needsUpdate = true;
+                    const h1Fist = isFist(h1);
+                    const h2Fist = isFist(h2);
 
-                // --- Logic ---
-                const thumbTip = lm[4];
-                const indexTip = lm[8];
-                const indexMcp = lm[5];
-                const pinkyMcp = lm[17];
-                const wrist = lm[0];
-                const middleMcp = lm[9];
+                    if (h1Fist || h2Fist) {
+                        // --- Scenario 2: One Fist (Lock Scale, Other Hand Rotates) ---
+                        statusDiv.innerText = "STATUS: SCALE LOCKED";
+                        gestureDiv.innerText = "FIST DETECTED. ROTATING WITH OTHER HAND.";
+                        
+                        const rotHand = h1Fist ? h2 : h1;
+                        const isRotHandPalm = isPalm(rotHand);
+                        
+                        // Only rotate if the rotating hand is open (not a fist)
+                        if (!isFist(rotHand)) {
+                            // Horizontal movement -> Y axis rotation
+                            targetRotY = (rotHand[0].x - 0.5) * Math.PI * 3;
+                            // Vertical movement -> X axis rotation
+                            targetRotX = (rotHand[0].y - 0.5) * Math.PI * 3;
+                            // Hand tilt (roll) -> Z axis rotation
+                            const wrist = rotHand[0];
+                            const pinkyMcp = rotHand[17];
+                            targetRotZ = Math.atan2(pinkyMcp.y - wrist.y, pinkyMcp.x - wrist.x) - Math.PI/2;
+                        }
+                    } else {
+                        // --- Scenario 3: Both Open (Parallel Scaling) ---
+                        statusDiv.innerText = "STATUS: SCALING";
+                        gestureDiv.innerText = "MOVE HANDS CLOSER/FURTHER TO RESIZE";
 
-                const pinchDist = Math.hypot(thumbTip.x - indexTip.x, thumbTip.y - indexTip.y, thumbTip.z - indexTip.z);
-                const isPinching = pinchDist < 0.05;
-
-                const isPalm = lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y < lm[14].y && lm[20].y < lm[18].y;
-
-                if (isPinching) {
-                    palmHoldStart = 0; // Cancel palm hold
-                    statusDiv.innerText = "STATUS: PINCHING";
-                    gestureDiv.innerText = "ROTATING & SCALING";
-
-                    // 1. Rotation: Map palm angle to mesh Y rotation
-                    const angle = Math.atan2(indexMcp.y - pinkyMcp.y, indexMcp.x - pinkyMcp.x);
-                    activeMesh.rotation.y = -angle * 2.5; 
-
-                    // 2. Scale: Map hand size (depth proxy) to mesh scale
-                    const handSize = Math.hypot(middleMcp.x - wrist.x, middleMcp.y - wrist.y, middleMcp.z - wrist.z);
-                    const targetScale = handSize * 15;
-                    activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), 0.1);
-
-                } else if (isPalm) {
-                    statusDiv.innerText = "STATUS: OPEN PALM";
-                    gestureDiv.innerText = "HOLD TO CHANGE SHAPE...";
-
-                    if (palmHoldStart === 0) palmHoldStart = Date.now();
-                    const holdTime = (Date.now() - palmHoldStart) / 1000;
-
-                    if (holdTime > 1.5) {
-                        // Cycle shape
-                        scene.remove(activeMesh);
-                        currentShapeIndex = (currentShapeIndex + 1) % geometries.length;
-                        activeMesh = new THREE.Mesh(geometries[currentShapeIndex], materials[currentShapeIndex]);
-                        activeMesh.position.set(2, 0, 0);
-                        activeMesh.scale.set(1, 1, 1);
-                        activeMesh.rotation.set(0, 0, 0);
-                        scene.add(activeMesh);
-                        palmHoldStart = 0; 
-                        statusDiv.innerText = "STATUS: SHAPE CHANGED!";
+                        const wrist1 = h1[0];
+                        const wrist2 = h2[0];
+                        // 3D distance between hands (normalized)
+                        const dist = Math.hypot(wrist1.x - wrist2.x, wrist1.y - wrist2.y, wrist1.z - wrist2.z);
+                        
+                        // Map distance to scale (closer = 0.5, further = up to 3.0)
+                        targetScale = Math.max(0.3, Math.min(dist * 4.0, 3.5));
                     }
-                } else {
-                    palmHoldStart = 0;
-                    statusDiv.innerText = "STATUS: TRACKING";
-                    gestureDiv.innerText = "PALM: SHAPE | PINCH: ROTATE/SCALE";
+                } 
+                
+                // --- Scenario 4: One Hand Visible (Shape Change) ---
+                else if (handsArr.length === 1) {
+                    const hand = handsArr[0];
+                    if (isPalm(hand)) {
+                        statusDiv.innerText = "STATUS: OPEN PALM";
+                        gestureDiv.innerText = "HOLD TO CHANGE SHAPE...";
+
+                        if (palmHoldStart === 0) palmHoldStart = Date.now();
+                        const holdTime = (Date.now() - palmHoldStart) / 1000;
+
+                        if (holdTime > 1.5) {
+                            scene.remove(activeMesh);
+                            currentShapeIndex = (currentShapeIndex + 1) % geometries.length;
+                            activeMesh = new THREE.Mesh(geometries[currentShapeIndex], materials[currentShapeIndex]);
+                            scene.add(activeMesh);
+                            palmHoldStart = 0; 
+                            statusDiv.innerText = "STATUS: SHAPE CHANGED!";
+                        }
+                    } else {
+                        palmHoldStart = 0;
+                        statusDiv.innerText = "STATUS: 1 HAND TRACKING";
+                        gestureDiv.innerText = "SHOW 2 HANDS TO SCALE, OR FIST TO ROTATE";
+                    }
                 }
-            } 
-
-            // Show/Hide Hand Skeleton
-            handGroup.visible = handDetected;
-
-            if (!handDetected) {
+            } else {
                 palmHoldStart = 0;
-                statusDiv.innerText = "STATUS: NO HAND";
-                gestureDiv.innerText = "SHOW HAND TO CAMERA";
+                statusDiv.innerText = "STATUS: NO HANDS";
+                gestureDiv.innerText = "SHOW HANDS TO CAMERA";
             }
         }
 
-        // --- Resize & Animation Loop ---
+        // --- Animation Loop (Smoothing Engine) ---
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Deterministic Exponential Smoothing
+            const smoothFactor = 0.15;
+            activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
+            
+            // Lerp rotation for buttery smooth transition
+            activeMesh.rotation.x += (targetRotX - activeMesh.rotation.x) * smoothFactor;
+            activeMesh.rotation.y += (targetRotY - activeMesh.rotation.y) * smoothFactor;
+            activeMesh.rotation.z += (targetRotZ - activeMesh.rotation.z) * smoothFactor;
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        // --- Resize ---
         function onResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -265,14 +258,7 @@
         }
         window.addEventListener('resize', onResize);
 
-        function animate() {
-            requestAnimationFrame(animate);
-            // STRICT RULE: No idle animation. Model remains completely static unless manipulated.
-            renderer.render(scene, camera);
-        }
-        animate();
-
-        // Start everything
+        // Start
         initHands();
     </script>
 </body>
