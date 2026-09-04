@@ -3,46 +3,73 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Holographic Manipulator</title>
+    <title>Hologram Interface</title>
     <style>
-        body { margin: 0; background: #05050a; overflow: hidden; font-family: sans-serif; color: white; }
+        body { margin: 0; background: #05050a; overflow: hidden; font-family: 'Segoe UI', sans-serif; color: white; }
         #video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; z-index: -1; }
-        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; transform: scaleX(-1); /* Mirror */ }
+        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; transform: scaleX(-1); }
         #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         
-        /* Premium UI Dock */
+        /* Clipped Corner Logic */
+        .clip-corner {
+            clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
+        }
+
+        /* Top Catalog */
+        #catalog-bar {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; z-index: 10; max-width: 90%; overflow-x: auto;
+            padding: 10px; background: rgba(15, 15, 25, 0.6);
+            border: 1px solid rgba(255, 145, 0, 0.4); /* Orange border */
+            backdrop-filter: blur(8px);
+        }
+        .catalog-btn {
+            background: transparent; border: 1px solid rgba(255, 145, 0, 0.3);
+            color: #ff9100; padding: 8px 12px; font-size: 10px; font-weight: bold;
+            cursor: pointer; transition: 0.2s; text-align: center; flex: 1; white-space: nowrap;
+        }
+        .catalog-btn.active { background: rgba(255, 145, 0, 0.2); border-color: #ff9100; box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); }
+
+        /* Bottom Dock */
         #ui-dock {
             position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
-            width: 180px; height: 56px; background: rgba(15, 15, 25, 0.6);
-            border: 1px solid rgba(0, 229, 255, 0.3); border-radius: 28px;
-            backdrop-filter: blur(10px); z-index: 10;
+            width: 160px; height: 50px; background: rgba(15, 15, 25, 0.7);
+            border: 1px solid rgba(255, 145, 0, 0.4);
+            backdrop-filter: blur(8px); z-index: 10;
             display: flex; justify-content: center; align-items: center;
-            box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
-            transition: all 0.3s ease;
         }
-        .icon { width: 24px; height: 24px; fill: none; stroke: #00e5ff; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.3; transition: opacity 0.3s; }
-        .icon.active { opacity: 1; filter: drop-shadow(0 0 5px #00e5ff); }
+        .icon { width: 22px; height: 22px; fill: none; stroke: #ff9100; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.3; transition: opacity 0.3s; }
+        .icon.active { opacity: 1; filter: drop-shadow(0 0 5px #ff9100); }
 
         #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050a; z-index: 100; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 20px; }
-        .spinner { border: 2px solid rgba(0, 229, 255, 0.2); border-top: 2px solid #00e5ff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        .spinner { border: 2px solid rgba(255, 145, 0, 0.2); border-top: 2px solid #ff9100; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div id="loader">
-        <div class="spinner"></div>
-    </div>
+    <div id="loader"><div class="spinner"></div></div>
 
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
-    <div id="ui-dock">
-        <!-- IDLE SVG -->
+    <!-- Top Catalog -->
+    <div id="catalog-bar" class="clip-corner">
+        <button class="catalog-btn active" onclick="selectShape(0)">CUBE</button>
+        <button class="catalog-btn" onclick="selectShape(1)">CONE</button>
+        <button class="catalog-btn" onclick="selectShape(2)">SPHERE</button>
+        <button class="catalog-btn" onclick="selectShape(3)">TORUS</button>
+        <button class="catalog-btn" onclick="selectShape(4)">KNOT</button>
+        <button class="catalog-btn" onclick="selectShape(5)">DODEC</button>
+        <button class="catalog-btn" onclick="selectShape(6)">ICOSA</button>
+        <button class="catalog-btn" onclick="selectShape(7)">CYLIN</button>
+        <button class="catalog-btn" onclick="selectShape(8)">TETRA</button>
+    </div>
+
+    <!-- Bottom Dock -->
+    <div id="ui-dock" class="clip-corner">
         <svg id="icon-idle" class="icon active" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
-        <!-- SCALE SVG -->
         <svg id="icon-scale" class="icon" viewBox="0 0 24 24" style="margin-left: 40px;"><path d="M21 3L9 15"></path><path d="M12 3h9v9"></path><path d="M3 21l12-12"></path><path d="M12 21H3v-9"></path></svg>
-        <!-- ROTATE SVG -->
         <svg id="icon-rotate" class="icon" viewBox="0 0 24 24" style="margin-left: 40px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
     </div>
 
@@ -89,166 +116,185 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
 
-        // Lighting
-        scene.add(new THREE.AmbientLight(0x00e5ff, 0.5));
+        scene.add(new THREE.AmbientLight(0x00ffcc, 0.5));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
         dirLight.position.set(2, 2, 3);
         scene.add(dirLight);
 
-        // --- Holographic Materials & Geometries ---
-        const holoMatCore = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.1, side: THREE.DoubleSide });
-        const holoMatWire = new THREE.MeshBasicMaterial({ color: 0x00e5ff, wireframe: true, transparent: true, opacity: 0.8 });
-        
+        // --- Custom Hologram Shader ---
+        const holoMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uScale: { value: 1.0 },
+                uColor: { value: new THREE.Color(0x00ffcc) }
+            },
+            vertexShader: `
+                varying vec3 vNormal;
+                varying vec3 vViewPosition;
+                varying vec3 vLocalPos;
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+                    vViewPosition = mvPosition.xyz;
+                    vLocalPos = position;
+                    gl_Position = projectionMatrix * mvPosition;
+                }
+            `,
+            fragmentShader: `
+                uniform float uTime;
+                uniform float uScale;
+                uniform vec3 uColor;
+                varying vec3 vNormal;
+                varying vec3 vViewPosition;
+                varying vec3 vLocalPos;
+                
+                void main() {
+                    // Fresnel (Edge Glow)
+                    vec3 viewDir = normalize(-vViewPosition);
+                    float fresnel = pow(1.0 - dot(vNormal, viewDir), 3.0);
+                    
+                    // Surface Ripples (Reacts to scale)
+                    // Dividing local position by scale stretches the ripples as it grows
+                    float rippleFreq = 15.0 / max(uScale, 0.1);
+                    float shimmer = sin((vLocalPos.y + uTime * 0.8) * rippleFreq) * 0.5 + 0.5;
+                    shimmer = smoothstep(0.3, 0.7, shimmer);
+                    
+                    // Combine
+                    vec3 finalColor = uColor * (0.3 + fresnel * 1.5 + shimmer * 0.4);
+                    float alpha = 0.2 + fresnel * 0.8 + shimmer * 0.2;
+                    
+                    gl_FragColor = vec4(finalColor, alpha);
+                }
+            `,
+            transparent: true,
+            side: THREE.DoubleSide,
+            depthWrite: false
+        });
+
+        // --- Catalog of Geometries ---
         const geometries = [
             new THREE.BoxGeometry(1.5, 1.5, 1.5),
             new THREE.ConeGeometry(1, 2, 32),
             new THREE.SphereGeometry(1.2, 32, 32),
-            new THREE.TorusGeometry(1, 0.4, 16, 100)
+            new THREE.TorusGeometry(1, 0.4, 16, 100),
+            new THREE.TorusKnotGeometry(0.8, 0.25, 100, 16),
+            new THREE.DodecahedronGeometry(1.2),
+            new THREE.IcosahedronGeometry(1.2),
+            new THREE.CylinderGeometry(0.8, 0.8, 2, 32),
+            new THREE.TetrahedronGeometry(1.5)
         ];
 
-        let activeMeshGroup = new THREE.Group();
-        activeMeshGroup.add(new THREE.Mesh(geometries[0], holoMatCore));
-        activeMeshGroup.add(new THREE.Mesh(geometries[0], holoMatWire));
-        scene.add(activeMeshGroup);
+        let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
+        scene.add(activeMesh);
 
         // --- Particle Aura ---
-        const particleCount = 150;
+        const particleCount = 200;
         const particleGeo = new THREE.BufferGeometry();
         const particlePos = new Float32Array(particleCount * 3);
-        for(let i=0; i<particleCount*3; i++) particlePos[i] = (Math.random() - 0.5) * 4;
+        for(let i=0; i<particleCount*3; i++) particlePos[i] = (Math.random() - 0.5) * 5;
         particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
-        const particleMat = new THREE.PointsMaterial({ color: 0x00e5ff, size: 0.04, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending });
+        const particleMat = new THREE.PointsMaterial({ color: 0x00ffcc, size: 0.03, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
         const particles = new THREE.Points(particleGeo, particleMat);
-        activeMeshGroup.add(particles);
+        scene.add(particles);
 
-        // --- Smoothing & State ---
+        // --- State & Smoothing ---
         let targetScale = 1.0;
-        let targetRotX = 0.0;
-        let targetRotY = 0.0;
-        let targetRotZ = 0.0;
         let currentShapeIndex = 0;
+        let targetRotX = 0.0, targetRotY = 0.0, targetRotZ = 0.0;
         let palmHoldStart = 0;
-        let baselineDist = null; // Used for relative scaling
+        let baselineDist = null;
+
+        window.selectShape = function(index) {
+            if (index === currentShapeIndex) return;
+            scene.remove(activeMesh);
+            currentShapeIndex = index;
+            activeMesh = new THREE.Mesh(geometries[index], holoMaterial);
+            scene.add(activeMesh);
+            
+            // Update UI
+            document.querySelectorAll('.catalog-btn').forEach((btn, i) => {
+                btn.classList.toggle('active', i === index);
+            });
+        }
 
         // --- Hand Tracking ---
         let hands;
         function initHands() {
-            hands = new Hands({
-                locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`
-            });
-            hands.setOptions({
-                maxNumHands: 2,
-                modelComplexity: 1,
-                minDetectionConfidence: 0.7,
-                minTrackingConfidence: 0.6
-            });
+            hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}` });
+            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
             hands.onResults(onResults);
-            startRawCamera(); // Bypass MediaPipe Camera Utility for zero latency
+            startRawCamera();
         }
 
         async function startRawCamera() {
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ 
-                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } 
-                });
+                const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
                 video.srcObject = stream;
                 await video.play();
                 loader.style.display = 'none';
                 processFrame();
-            } catch (err) {
-                console.error("Camera error:", err);
-            }
+            } catch (err) { console.error("Camera error:", err); }
         }
 
-        // Zero-latency processing loop
         async function processFrame() {
-            if (video.readyState >= 2) {
-                await hands.send({ image: video });
-            }
+            if (video.readyState >= 2) await hands.send({ image: video });
             requestAnimationFrame(processFrame);
         }
 
-        function isFist(lm) {
-            return lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y;
-        }
-        function isPalm(lm) {
-            return lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y < lm[14].y && lm[20].y < lm[18].y;
-        }
+        function isFist(lm) { return lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y; }
+        function isPalm(lm) { return lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y < lm[14].y && lm[20].y < lm[18].y; }
 
         function onResults(results) {
-            // 1. Draw Premium Skeleton
             overlayCanvas.width = window.innerWidth;
             overlayCanvas.height = window.innerHeight;
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             
             if (results.multiHandLandmarks) {
                 for (const landmarks of results.multiHandLandmarks) {
-                    // Thin white lines
                     drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: 'rgba(255,255,255,0.7)', lineWidth: 1 });
-                    // Small red dots
                     drawLandmarks(overlayCtx, landmarks, { color: 'rgba(255,0,0,0.8)', fillColor: 'rgba(255,0,0,0.8)', lineWidth: 0, radius: 3 });
                 }
             }
 
-            // 2. 3D Manipulation Logic
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const handsArr = results.multiHandLandmarks;
                 
                 if (handsArr.length === 2) {
                     palmHoldStart = 0;
-                    const h1 = handsArr[0];
-                    const h2 = handsArr[1];
-
-                    const h1Fist = isFist(h1);
-                    const h2Fist = isFist(h2);
+                    const h1 = handsArr[0], h2 = handsArr[1];
+                    const h1Fist = isFist(h1), h2Fist = isFist(h2);
 
                     if (h1Fist || h2Fist) {
-                        // --- ROTATE MODE ---
                         setActiveIcon("rotate");
                         const rotHand = h1Fist ? h2 : h1;
-                        
                         if (!isFist(rotHand)) {
                             targetRotY = (rotHand[0].x - 0.5) * Math.PI * 3;
                             targetRotX = (rotHand[0].y - 0.5) * Math.PI * 3;
-                            const wrist = rotHand[0];
-                            const pinkyMcp = rotHand[17];
+                            const wrist = rotHand[0], pinkyMcp = rotHand[17];
                             targetRotZ = Math.atan2(pinkyMcp.y - wrist.y, pinkyMcp.x - wrist.x) - Math.PI/2;
                         }
                     } else {
-                        // --- SCALE MODE ---
                         setActiveIcon("scale");
-                        const wrist1 = h1[0];
-                        const wrist2 = h2[0];
+                        const wrist1 = h1[0], wrist2 = h2[0];
                         const dist = Math.hypot(wrist1.x - wrist2.x, wrist1.y - wrist2.y, wrist1.z - wrist2.z);
                         
-                        // Initialize baseline distance on first detection
                         if (baselineDist === null) {
                             baselineDist = dist;
-                            targetScale = 1.0; // Default size
-                            targetRotX = 0; targetRotY = 0; targetRotZ = 0; // Default position
+                            targetScale = 1.0; 
+                            targetRotX = 0; targetRotY = 0; targetRotZ = 0; 
                         } else {
-                            // Scale relative to baseline
-                            const relativeScale = dist / baselineDist;
-                            targetScale = Math.max(0.3, Math.min(relativeScale * 1.2, 3.5));
+                            targetScale = Math.max(0.3, Math.min((dist / baselineDist) * 1.2, 3.5));
                         }
                     }
-                } 
-                else if (handsArr.length === 1) {
-                    // --- SHAPE CHANGE MODE ---
+                } else if (handsArr.length === 1) {
                     setActiveIcon("idle");
-                    baselineDist = null; // Reset baseline when one hand is lost
+                    baselineDist = null;
                     const hand = handsArr[0];
                     
                     if (isPalm(hand)) {
                         if (palmHoldStart === 0) palmHoldStart = Date.now();
                         if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
-                            scene.remove(activeMeshGroup);
-                            currentShapeIndex = (currentShapeIndex + 1) % geometries.length;
-                            activeMeshGroup = new THREE.Group();
-                            activeMeshGroup.add(new THREE.Mesh(geometries[currentShapeIndex], holoMatCore));
-                            activeMeshGroup.add(new THREE.Mesh(geometries[currentShapeIndex], holoMatWire));
-                            activeMeshGroup.add(particles);
-                            scene.add(activeMeshGroup);
+                            selectShape((currentShapeIndex + 1) % geometries.length);
                             palmHoldStart = 0; 
                         }
                     } else {
@@ -262,21 +308,25 @@
             }
         }
 
-        // --- Animation Loop (Smoothing Engine) ---
+        // --- Animation Loop ---
+        const clock = new THREE.Clock();
         function animate() {
             requestAnimationFrame(animate);
-            const smoothFactor = 0.2; // Snappy but smooth
+            const delta = clock.getDelta();
+            const elapsed = clock.elapsedTime;
             
-            if (activeMeshGroup) {
-                activeMeshGroup.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
-                activeMeshGroup.rotation.x += (targetRotX - activeMeshGroup.rotation.x) * smoothFactor;
-                activeMeshGroup.rotation.y += (targetRotY - activeMeshGroup.rotation.y) * smoothFactor;
-                activeMeshGroup.rotation.z += (targetRotZ - activeMeshGroup.rotation.z) * smoothFactor;
+            // Update Shader Uniforms
+            holoMaterial.uniforms.uTime.value = elapsed;
+            holoMaterial.uniforms.uScale.value = targetScale; // Feed target scale so ripples react
+            
+            const smoothFactor = 0.2;
+            activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
+            activeMesh.rotation.x += (targetRotX - activeMesh.rotation.x) * smoothFactor;
+            activeMesh.rotation.y += (targetRotY - activeMesh.rotation.y) * smoothFactor;
+            activeMesh.rotation.z += (targetRotZ - activeMesh.rotation.z) * smoothFactor;
 
-                // Animate particles
-                particles.rotation.y += 0.002;
-                particles.rotation.x += 0.001;
-            }
+            particles.rotation.y += 0.002;
+            particles.rotation.x += 0.001;
             
             renderer.render(scene, camera);
         }
