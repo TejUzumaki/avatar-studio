@@ -14,9 +14,14 @@
             clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
         }
 
-        #catalog-bar {
+        /* Top Bar Container */
+        #top-bar {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 10px; z-index: 10; max-width: 90%; overflow-x: auto;
+            display: flex; align-items: center; gap: 15px; z-index: 10; max-width: 95%;
+        }
+
+        #catalog-bar {
+            display: flex; gap: 10px; overflow-x: auto;
             padding: 10px; background: rgba(15, 15, 25, 0.6);
             border: 1px solid rgba(255, 145, 0, 0.4); 
             backdrop-filter: blur(8px);
@@ -27,6 +32,15 @@
             cursor: pointer; transition: 0.2s; text-align: center; flex: 1; white-space: nowrap;
         }
         .catalog-btn.active { background: rgba(255, 145, 0, 0.2); border-color: #ff9100; box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); }
+
+        /* Import Button */
+        #import-btn {
+            background: rgba(15, 15, 25, 0.7); border: 1px solid #ff9100; color: #ff9100;
+            padding: 10px 15px; font-size: 12px; font-weight: bold; cursor: pointer;
+            backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(255, 145, 0, 0.3);
+            display: flex; align-items: center; justify-content: center; height: 40px;
+        }
+        #file-input { display: none; }
 
         #ui-dock {
             position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
@@ -50,16 +64,21 @@
     <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
-    <div id="catalog-bar" class="clip-corner">
-        <button class="catalog-btn active" onclick="selectShape(0)">CUBE</button>
-        <button class="catalog-btn" onclick="selectShape(1)">CONE</button>
-        <button class="catalog-btn" onclick="selectShape(2)">SPHERE</button>
-        <button class="catalog-btn" onclick="selectShape(3)">TORUS</button>
-        <button class="catalog-btn" onclick="selectShape(4)">KNOT</button>
-        <button class="catalog-btn" onclick="selectShape(5)">DODEC</button>
-        <button class="catalog-btn" onclick="selectShape(6)">ICOSA</button>
-        <button class="catalog-btn" onclick="selectShape(7)">CYLIN</button>
-        <button class="catalog-btn" onclick="selectShape(8)">TETRA</button>
+    <!-- Top Bar with Catalog and Import -->
+    <div id="top-bar">
+        <div id="catalog-bar" class="clip-corner">
+            <button class="catalog-btn active" onclick="selectShape(0)">CUBE</button>
+            <button class="catalog-btn" onclick="selectShape(1)">CONE</button>
+            <button class="catalog-btn" onclick="selectShape(2)">SPHERE</button>
+            <button class="catalog-btn" onclick="selectShape(3)">TORUS</button>
+            <button class="catalog-btn" onclick="selectShape(4)">KNOT</button>
+            <button class="catalog-btn" onclick="selectShape(5)">DODEC</button>
+            <button class="catalog-btn" onclick="selectShape(6)">ICOSA</button>
+            <button class="catalog-btn" onclick="selectShape(7)">CYLIN</button>
+            <button class="catalog-btn" onclick="selectShape(8)">TETRA</button>
+        </div>
+        <input type="file" id="file-input" accept=".glb,.gltf">
+        <button id="import-btn" class="clip-corner" onclick="document.getElementById('file-input').click()">IMPORT</button>
     </div>
 
     <div id="ui-dock" class="clip-corner">
@@ -82,7 +101,7 @@
 
     <script type="module">
         import * as THREE from 'three';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'; // Extracted from your code
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
         const video = document.getElementById('video');
         const overlayCanvas = document.getElementById('overlay-canvas');
@@ -105,55 +124,99 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
 
-        scene.add(new THREE.AmbientLight(0x00ffcc, 0.5));
+        scene.add(new THREE.AmbientLight(0x00ffff, 0.5));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
         dirLight.position.set(2, 2, 3);
         scene.add(dirLight);
 
-        // --- Custom Hologram Shader ---
+        // --- INTEGRATED 3D Holographic Shader ---
+        const holographicVertexShader = `
+            uniform float uTime;
+            uniform float uGlitchIntensity;
+            uniform float uGlitchFrequency;
+            uniform float uRippleFrequency;
+            uniform float uRippleSpeed;
+            uniform float uRippleHeight;
+
+            varying vec3 vNormal;
+            varying vec3 vWorldPosition;
+            varying vec2 vUv;
+            varying float vRipple;
+
+            float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
+
+            void main() {
+                vNormal = normalize(normalMatrix * normal);
+                vUv = uv;
+                vec3 pos = position;
+
+                float ripple = sin(pos.y * uRippleFrequency - uTime * uRippleSpeed);
+                vRipple = ripple;
+                pos += normal * ripple * uRippleHeight;
+
+                float glitchTime = floor(uTime * uGlitchFrequency);
+                float noiseVal = random(vec2(glitchTime, pos.y * 0.1));
+                if (noiseVal > 0.75) {
+                    pos.x += (random(vec2(pos.y, uTime)) - 0.5) * uGlitchIntensity;
+                    pos.z += (random(vec2(pos.x, uTime)) - 0.5) * uGlitchIntensity;
+                }
+
+                vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
+                vWorldPosition = worldPosition.xyz;
+                gl_Position = projectionMatrix * viewMatrix * worldPosition;
+            }
+        `;
+
+        const holographicFragmentShader = `
+            uniform vec3 uColor;
+            uniform float uAlpha;
+            uniform float uFresnelPower;
+            uniform float uFresnelIntensity;
+            uniform float uScanlineFrequency;
+            uniform float uScanlineSpeed;
+            uniform float uTime;
+
+            varying vec3 vNormal;
+            varying vec3 vWorldPosition;
+            varying vec2 vUv;
+            varying float vRipple;
+
+            void main() {
+                vec3 normal = normalize(vNormal);
+                vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+
+                float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), uFresnelPower) * uFresnelIntensity;
+                float scanline = sin(vWorldPosition.y * uScanlineFrequency - uTime * uScanlineSpeed) * 0.5 + 0.5;
+                scanline = pow(scanline, 1.5);
+
+                float holoAlpha = (fresnel + scanline * 0.35 + vRipple * 0.1) * uAlpha;
+                vec3 finalColor = uColor + vec3(fresnel * 0.5);
+
+                gl_FragColor = vec4(finalColor, clamp(holoAlpha, 0.0, 1.0));
+            }
+        `;
+
         const holoMaterial = new THREE.ShaderMaterial({
+            vertexShader: holographicVertexShader,
+            fragmentShader: holographicFragmentShader,
             uniforms: {
                 uTime: { value: 0 },
-                uScale: { value: 1.0 },
-                uColor: { value: new THREE.Color(0x00ffcc) }
+                uColor: { value: new THREE.Color('#00ffff') },
+                uAlpha: { value: 0.98 },
+                uFresnelPower: { value: 8 },
+                uFresnelIntensity: { value: 0.3 },
+                uScanlineFrequency: { value: 6 },
+                uScanlineSpeed: { value: 15 },
+                uGlitchIntensity: { value: 0.05 },
+                uGlitchFrequency: { value: 20 },
+                uRippleFrequency: { value: 0 },
+                uRippleSpeed: { value: 1.3 },
+                uRippleHeight: { value: 0 }
             },
-            vertexShader: `
-                varying vec3 vNormal;
-                varying vec3 vViewPosition;
-                varying vec3 vLocalPos;
-                void main() {
-                    vNormal = normalize(normalMatrix * normal);
-                    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
-                    vViewPosition = mvPosition.xyz;
-                    vLocalPos = position;
-                    gl_Position = projectionMatrix * mvPosition;
-                }
-            `,
-            fragmentShader: `
-                uniform float uTime;
-                uniform float uScale;
-                uniform vec3 uColor;
-                varying vec3 vNormal;
-                varying vec3 vViewPosition;
-                varying vec3 vLocalPos;
-                
-                void main() {
-                    vec3 viewDir = normalize(-vViewPosition);
-                    float fresnel = pow(1.0 - dot(vNormal, viewDir), 3.0);
-                    
-                    float rippleFreq = 15.0 / max(uScale, 0.1);
-                    float shimmer = sin((vLocalPos.y + uTime * 0.8) * rippleFreq) * 0.5 + 0.5;
-                    shimmer = smoothstep(0.3, 0.7, shimmer);
-                    
-                    vec3 finalColor = uColor * (0.3 + fresnel * 1.5 + shimmer * 0.4);
-                    float alpha = 0.2 + fresnel * 0.8 + shimmer * 0.2;
-                    
-                    gl_FragColor = vec4(finalColor, alpha);
-                }
-            `,
             transparent: true,
-            side: THREE.DoubleSide,
-            depthWrite: false
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide
         });
 
         // --- Catalog of Geometries ---
@@ -172,31 +235,34 @@
         let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
         scene.add(activeMesh);
 
-        // --- Extracted from your code: GLTF Loader ---
-        // You can now load custom .glb models and they will become holograms!
+        // --- GLTF Import Logic ---
         const gltfLoader = new GLTFLoader();
-        // To use: put a model in your folder and call loadCustomModel('./suzanne.glb')
-        window.loadCustomModel = function(url) {
+        document.getElementById('file-input').addEventListener('change', (event) => {
+            const file = event.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            
             gltfLoader.load(url, (gltf) => {
                 scene.remove(activeMesh);
                 activeMesh = gltf.scene;
                 
-                // Traverse the model and apply the hologram material
                 activeMesh.traverse((child) => {
                     if(child.isMesh) child.material = holoMaterial;
                 });
                 
-                // Scale and center it properly
                 const box = new THREE.Box3().setFromObject(activeMesh);
                 const size = box.getSize(new THREE.Vector3());
                 const center = box.getCenter(new THREE.Vector3());
                 const maxDim = Math.max(size.x, size.y, size.z);
-                activeMesh.scale.multiplyScalar(1.5 / maxDim); // Normalize size
+                activeMesh.scale.multiplyScalar(1.5 / maxDim);
                 activeMesh.position.sub(center.multiplyScalar(1.5 / maxDim));
                 
                 scene.add(activeMesh);
+                
+                // Deselect catalog buttons
+                document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
             });
-        }
+        });
 
         // --- Particle Aura ---
         const particleCount = 200;
@@ -204,7 +270,7 @@
         const particlePos = new Float32Array(particleCount * 3);
         for(let i=0; i<particleCount*3; i++) particlePos[i] = (Math.random() - 0.5) * 5;
         particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
-        const particleMat = new THREE.PointsMaterial({ color: 0x00ffcc, size: 0.03, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
+        const particleMat = new THREE.PointsMaterial({ color: 0x00ffff, size: 0.03, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending });
         const particles = new THREE.Points(particleGeo, particleMat);
         scene.add(particles);
 
@@ -326,10 +392,17 @@
             const elapsed = clock.elapsedTime;
             
             holoMaterial.uniforms.uTime.value = elapsed;
-            holoMaterial.uniforms.uScale.value = targetScale; 
             
             const smoothFactor = 0.2;
-            activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
+            // Custom scale logic for imported GLTF vs Primitives
+            if (activeMesh.isMesh) {
+                activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
+            } else {
+                // Preserve the base scale of the GLTF and multiply by target scale
+                const baseScale = 1.5 / activeMesh.userData.baseSize || 1; 
+                activeMesh.scale.lerp(new THREE.Vector3(baseScale * targetScale, baseScale * targetScale, baseScale * targetScale), smoothFactor);
+            }
+            
             activeMesh.rotation.x += (targetRotX - activeMesh.rotation.x) * smoothFactor;
             activeMesh.rotation.y += (targetRotY - activeMesh.rotation.y) * smoothFactor;
             activeMesh.rotation.z += (targetRotZ - activeMesh.rotation.z) * smoothFactor;
