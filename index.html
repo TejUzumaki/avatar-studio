@@ -10,17 +10,15 @@
         #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; transform: scaleX(-1); }
         #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         
-        /* Clipped Corner Logic */
         .clip-corner {
             clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
         }
 
-        /* Top Catalog */
         #catalog-bar {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
             display: flex; gap: 10px; z-index: 10; max-width: 90%; overflow-x: auto;
             padding: 10px; background: rgba(15, 15, 25, 0.6);
-            border: 1px solid rgba(255, 145, 0, 0.4); /* Orange border */
+            border: 1px solid rgba(255, 145, 0, 0.4); 
             backdrop-filter: blur(8px);
         }
         .catalog-btn {
@@ -30,7 +28,6 @@
         }
         .catalog-btn.active { background: rgba(255, 145, 0, 0.2); border-color: #ff9100; box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); }
 
-        /* Bottom Dock */
         #ui-dock {
             position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
             width: 160px; height: 50px; background: rgba(15, 15, 25, 0.7);
@@ -53,7 +50,6 @@
     <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
-    <!-- Top Catalog -->
     <div id="catalog-bar" class="clip-corner">
         <button class="catalog-btn active" onclick="selectShape(0)">CUBE</button>
         <button class="catalog-btn" onclick="selectShape(1)">CONE</button>
@@ -66,18 +62,15 @@
         <button class="catalog-btn" onclick="selectShape(8)">TETRA</button>
     </div>
 
-    <!-- Bottom Dock -->
     <div id="ui-dock" class="clip-corner">
         <svg id="icon-idle" class="icon active" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
         <svg id="icon-scale" class="icon" viewBox="0 0 24 24" style="margin-left: 40px;"><path d="M21 3L9 15"></path><path d="M12 3h9v9"></path><path d="M3 21l12-12"></path><path d="M12 21H3v-9"></path></svg>
         <svg id="icon-rotate" class="icon" viewBox="0 0 24 24" style="margin-left: 40px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
     </div>
 
-    <!-- MediaPipe -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
 
-    <!-- Three.js -->
     <script type="importmap">
     {
       "imports": {
@@ -89,6 +82,7 @@
 
     <script type="module">
         import * as THREE from 'three';
+        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js'; // Extracted from your code
 
         const video = document.getElementById('video');
         const overlayCanvas = document.getElementById('overlay-canvas');
@@ -96,12 +90,7 @@
         const threeCanvas = document.getElementById('three-canvas');
         const loader = document.getElementById('loader');
 
-        const icons = {
-            idle: document.getElementById('icon-idle'),
-            scale: document.getElementById('icon-scale'),
-            rotate: document.getElementById('icon-rotate')
-        };
-
+        const icons = { idle: document.getElementById('icon-idle'), scale: document.getElementById('icon-scale'), rotate: document.getElementById('icon-rotate') };
         function setActiveIcon(name) {
             for (const key in icons) icons[key].classList.remove('active');
             if (icons[name]) icons[name].classList.add('active');
@@ -149,17 +138,13 @@
                 varying vec3 vLocalPos;
                 
                 void main() {
-                    // Fresnel (Edge Glow)
                     vec3 viewDir = normalize(-vViewPosition);
                     float fresnel = pow(1.0 - dot(vNormal, viewDir), 3.0);
                     
-                    // Surface Ripples (Reacts to scale)
-                    // Dividing local position by scale stretches the ripples as it grows
                     float rippleFreq = 15.0 / max(uScale, 0.1);
                     float shimmer = sin((vLocalPos.y + uTime * 0.8) * rippleFreq) * 0.5 + 0.5;
                     shimmer = smoothstep(0.3, 0.7, shimmer);
                     
-                    // Combine
                     vec3 finalColor = uColor * (0.3 + fresnel * 1.5 + shimmer * 0.4);
                     float alpha = 0.2 + fresnel * 0.8 + shimmer * 0.2;
                     
@@ -187,6 +172,32 @@
         let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
         scene.add(activeMesh);
 
+        // --- Extracted from your code: GLTF Loader ---
+        // You can now load custom .glb models and they will become holograms!
+        const gltfLoader = new GLTFLoader();
+        // To use: put a model in your folder and call loadCustomModel('./suzanne.glb')
+        window.loadCustomModel = function(url) {
+            gltfLoader.load(url, (gltf) => {
+                scene.remove(activeMesh);
+                activeMesh = gltf.scene;
+                
+                // Traverse the model and apply the hologram material
+                activeMesh.traverse((child) => {
+                    if(child.isMesh) child.material = holoMaterial;
+                });
+                
+                // Scale and center it properly
+                const box = new THREE.Box3().setFromObject(activeMesh);
+                const size = box.getSize(new THREE.Vector3());
+                const center = box.getCenter(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+                activeMesh.scale.multiplyScalar(1.5 / maxDim); // Normalize size
+                activeMesh.position.sub(center.multiplyScalar(1.5 / maxDim));
+                
+                scene.add(activeMesh);
+            });
+        }
+
         // --- Particle Aura ---
         const particleCount = 200;
         const particleGeo = new THREE.BufferGeometry();
@@ -211,7 +222,6 @@
             activeMesh = new THREE.Mesh(geometries[index], holoMaterial);
             scene.add(activeMesh);
             
-            // Update UI
             document.querySelectorAll('.catalog-btn').forEach((btn, i) => {
                 btn.classList.toggle('active', i === index);
             });
@@ -315,9 +325,8 @@
             const delta = clock.getDelta();
             const elapsed = clock.elapsedTime;
             
-            // Update Shader Uniforms
             holoMaterial.uniforms.uTime.value = elapsed;
-            holoMaterial.uniforms.uScale.value = targetScale; // Feed target scale so ripples react
+            holoMaterial.uniforms.uScale.value = targetScale; 
             
             const smoothFactor = 0.2;
             activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
