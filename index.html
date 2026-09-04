@@ -3,46 +3,52 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>3D Dual-Hand Manipulator</title>
+    <title>Holographic Manipulator</title>
     <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: sans-serif; color: white; }
-        #video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); z-index: 0; }
-        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; }
+        body { margin: 0; background: #05050a; overflow: hidden; font-family: sans-serif; color: white; }
+        #video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; z-index: -1; }
+        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; transform: scaleX(-1); /* Mirror */ }
         #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         
-        #ui-overlay {
-            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-            background: rgba(0,0,0,0.7); padding: 15px 25px; border-radius: 30px;
-            text-align: center; z-index: 10; border: 1px solid rgba(255,255,255,0.3);
-            backdrop-filter: blur(5px);
+        /* Premium UI Dock */
+        #ui-dock {
+            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
+            width: 180px; height: 56px; background: rgba(15, 15, 25, 0.6);
+            border: 1px solid rgba(0, 229, 255, 0.3); border-radius: 28px;
+            backdrop-filter: blur(10px); z-index: 10;
+            display: flex; justify-content: center; align-items: center;
+            box-shadow: 0 0 20px rgba(0, 229, 255, 0.1);
+            transition: all 0.3s ease;
         }
-        #status { font-size: 14px; font-weight: bold; color: #4a9eff; }
-        #gesture { font-size: 12px; color: #aaa; margin-top: 5px; }
+        .icon { width: 24px; height: 24px; fill: none; stroke: #00e5ff; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.3; transition: opacity 0.3s; }
+        .icon.active { opacity: 1; filter: drop-shadow(0 0 5px #00e5ff); }
 
-        #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #000; z-index: 100; display: flex; justify-content: center; align-items: center; color: white; flex-direction: column; gap: 15px; }
-        .spinner { border: 4px solid #333; border-top: 4px solid #4a9eff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
+        #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050a; z-index: 100; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 20px; }
+        .spinner { border: 2px solid rgba(0, 229, 255, 0.2); border-top: 2px solid #00e5ff; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
     <div id="loader">
         <div class="spinner"></div>
-        <div>Initializing Precision Tracking...</div>
     </div>
 
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
-    <div id="ui-overlay">
-        <div id="status">SHOW HANDS TO START</div>
-        <div id="gesture">2 HANDS: SCALE | FIST+HAND: ROTATE</div>
+    <div id="ui-dock">
+        <!-- IDLE SVG -->
+        <svg id="icon-idle" class="icon active" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+        <!-- SCALE SVG -->
+        <svg id="icon-scale" class="icon" viewBox="0 0 24 24" style="margin-left: 40px;"><path d="M21 3L9 15"></path><path d="M12 3h9v9"></path><path d="M3 21l12-12"></path><path d="M12 21H3v-9"></path></svg>
+        <!-- ROTATE SVG -->
+        <svg id="icon-rotate" class="icon" viewBox="0 0 24 24" style="margin-left: 40px;"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
     </div>
 
     <!-- MediaPipe -->
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.js" crossorigin="anonymous"></script>
     <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils@0.3.1675466124/drawing_utils.js" crossorigin="anonymous"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1640029074/camera_utils.js" crossorigin="anonymous"></script>
 
     <!-- Three.js -->
     <script type="importmap">
@@ -62,8 +68,17 @@
         const overlayCtx = overlayCanvas.getContext('2d');
         const threeCanvas = document.getElementById('three-canvas');
         const loader = document.getElementById('loader');
-        const statusDiv = document.getElementById('status');
-        const gestureDiv = document.getElementById('gesture');
+
+        const icons = {
+            idle: document.getElementById('icon-idle'),
+            scale: document.getElementById('icon-scale'),
+            rotate: document.getElementById('icon-rotate')
+        };
+
+        function setActiveIcon(name) {
+            for (const key in icons) icons[key].classList.remove('active');
+            if (icons[name]) icons[name].classList.add('active');
+        }
 
         // --- Three.js Setup ---
         const scene = new THREE.Scene();
@@ -75,37 +90,47 @@
         renderer.setPixelRatio(window.devicePixelRatio);
 
         // Lighting
-        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+        scene.add(new THREE.AmbientLight(0x00e5ff, 0.5));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.0);
         dirLight.position.set(2, 2, 3);
         scene.add(dirLight);
 
-        // Primitives
-        const materials = [
-            new THREE.MeshStandardMaterial({ color: 0xff4a6b, roughness: 0.3, metalness: 0.5 }),
-            new THREE.MeshStandardMaterial({ color: 0x4a9eff, roughness: 0.3, metalness: 0.5 }),
-            new THREE.MeshStandardMaterial({ color: 0xffdd00, roughness: 0.3, metalness: 0.5 }),
-            new THREE.MeshStandardMaterial({ color: 0x00ffaa, roughness: 0.3, metalness: 0.5 })
-        ];
+        // --- Holographic Materials & Geometries ---
+        const holoMatCore = new THREE.MeshBasicMaterial({ color: 0x00e5ff, transparent: true, opacity: 0.1, side: THREE.DoubleSide });
+        const holoMatWire = new THREE.MeshBasicMaterial({ color: 0x00e5ff, wireframe: true, transparent: true, opacity: 0.8 });
+        
         const geometries = [
             new THREE.BoxGeometry(1.5, 1.5, 1.5),
             new THREE.ConeGeometry(1, 2, 32),
             new THREE.SphereGeometry(1.2, 32, 32),
             new THREE.TorusGeometry(1, 0.4, 16, 100)
         ];
-        
-        let activeMesh = new THREE.Mesh(geometries[0], materials[0]);
-        scene.add(activeMesh);
 
-        // --- Smoothing State Variables ---
+        let activeMeshGroup = new THREE.Group();
+        activeMeshGroup.add(new THREE.Mesh(geometries[0], holoMatCore));
+        activeMeshGroup.add(new THREE.Mesh(geometries[0], holoMatWire));
+        scene.add(activeMeshGroup);
+
+        // --- Particle Aura ---
+        const particleCount = 150;
+        const particleGeo = new THREE.BufferGeometry();
+        const particlePos = new Float32Array(particleCount * 3);
+        for(let i=0; i<particleCount*3; i++) particlePos[i] = (Math.random() - 0.5) * 4;
+        particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePos, 3));
+        const particleMat = new THREE.PointsMaterial({ color: 0x00e5ff, size: 0.04, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending });
+        const particles = new THREE.Points(particleGeo, particleMat);
+        activeMeshGroup.add(particles);
+
+        // --- Smoothing & State ---
         let targetScale = 1.0;
         let targetRotX = 0.0;
         let targetRotY = 0.0;
         let targetRotZ = 0.0;
-        let palmHoldStart = 0;
         let currentShapeIndex = 0;
+        let palmHoldStart = 0;
+        let baselineDist = null; // Used for relative scaling
 
-        // --- Hand Tracking Logic ---
+        // --- Hand Tracking ---
         let hands;
         function initHands() {
             hands = new Hands({
@@ -113,23 +138,37 @@
             });
             hands.setOptions({
                 maxNumHands: 2,
-                modelComplexity: 1, // Higher complexity for precision
+                modelComplexity: 1,
                 minDetectionConfidence: 0.7,
                 minTrackingConfidence: 0.6
             });
             hands.onResults(onResults);
-
-            const cameraUtil = new Camera(video, {
-                onFrame: async () => { await hands.send({ image: video }); },
-                width: 1280,
-                height: 720
-            });
-            cameraUtil.start().then(() => { loader.style.display = 'none'; });
+            startRawCamera(); // Bypass MediaPipe Camera Utility for zero latency
         }
 
-        // Helper: Gesture Detection
+        async function startRawCamera() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } 
+                });
+                video.srcObject = stream;
+                await video.play();
+                loader.style.display = 'none';
+                processFrame();
+            } catch (err) {
+                console.error("Camera error:", err);
+            }
+        }
+
+        // Zero-latency processing loop
+        async function processFrame() {
+            if (video.readyState >= 2) {
+                await hands.send({ image: video });
+            }
+            requestAnimationFrame(processFrame);
+        }
+
         function isFist(lm) {
-            // Check if fingers are curled towards palm
             return lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y;
         }
         function isPalm(lm) {
@@ -137,31 +176,26 @@
         }
 
         function onResults(results) {
-            // 1. Draw MediaPipe Native Overlay
+            // 1. Draw Premium Skeleton
             overlayCanvas.width = window.innerWidth;
             overlayCanvas.height = window.innerHeight;
-            overlayCtx.save();
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             
-            // Mirror the drawing context to match the mirrored video
-            overlayCtx.translate(window.innerWidth, 0);
-            overlayCtx.scale(-1, 1);
-
             if (results.multiHandLandmarks) {
                 for (const landmarks of results.multiHandLandmarks) {
-                    drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: '#00FF00', lineWidth: 4 });
-                    drawLandmarks(overlayCtx, landmarks, { color: '#FF0000', lineWidth: 2, radius: 4 });
+                    // Thin white lines
+                    drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: 'rgba(255,255,255,0.7)', lineWidth: 1 });
+                    // Small red dots
+                    drawLandmarks(overlayCtx, landmarks, { color: 'rgba(255,0,0,0.8)', fillColor: 'rgba(255,0,0,0.8)', lineWidth: 0, radius: 3 });
                 }
             }
-            overlayCtx.restore();
 
             // 2. 3D Manipulation Logic
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                 const handsArr = results.multiHandLandmarks;
                 
-                // --- Scenario 1: Two Hands Visible (Scaling) ---
                 if (handsArr.length === 2) {
-                    palmHoldStart = 0; // Cancel shape change
+                    palmHoldStart = 0;
                     const h1 = handsArr[0];
                     const h2 = handsArr[1];
 
@@ -169,88 +203,85 @@
                     const h2Fist = isFist(h2);
 
                     if (h1Fist || h2Fist) {
-                        // --- Scenario 2: One Fist (Lock Scale, Other Hand Rotates) ---
-                        statusDiv.innerText = "STATUS: SCALE LOCKED";
-                        gestureDiv.innerText = "FIST DETECTED. ROTATING WITH OTHER HAND.";
-                        
+                        // --- ROTATE MODE ---
+                        setActiveIcon("rotate");
                         const rotHand = h1Fist ? h2 : h1;
-                        const isRotHandPalm = isPalm(rotHand);
                         
-                        // Only rotate if the rotating hand is open (not a fist)
                         if (!isFist(rotHand)) {
-                            // Horizontal movement -> Y axis rotation
                             targetRotY = (rotHand[0].x - 0.5) * Math.PI * 3;
-                            // Vertical movement -> X axis rotation
                             targetRotX = (rotHand[0].y - 0.5) * Math.PI * 3;
-                            // Hand tilt (roll) -> Z axis rotation
                             const wrist = rotHand[0];
                             const pinkyMcp = rotHand[17];
                             targetRotZ = Math.atan2(pinkyMcp.y - wrist.y, pinkyMcp.x - wrist.x) - Math.PI/2;
                         }
                     } else {
-                        // --- Scenario 3: Both Open (Parallel Scaling) ---
-                        statusDiv.innerText = "STATUS: SCALING";
-                        gestureDiv.innerText = "MOVE HANDS CLOSER/FURTHER TO RESIZE";
-
+                        // --- SCALE MODE ---
+                        setActiveIcon("scale");
                         const wrist1 = h1[0];
                         const wrist2 = h2[0];
-                        // 3D distance between hands (normalized)
                         const dist = Math.hypot(wrist1.x - wrist2.x, wrist1.y - wrist2.y, wrist1.z - wrist2.z);
                         
-                        // Map distance to scale (closer = 0.5, further = up to 3.0)
-                        targetScale = Math.max(0.3, Math.min(dist * 4.0, 3.5));
+                        // Initialize baseline distance on first detection
+                        if (baselineDist === null) {
+                            baselineDist = dist;
+                            targetScale = 1.0; // Default size
+                            targetRotX = 0; targetRotY = 0; targetRotZ = 0; // Default position
+                        } else {
+                            // Scale relative to baseline
+                            const relativeScale = dist / baselineDist;
+                            targetScale = Math.max(0.3, Math.min(relativeScale * 1.2, 3.5));
+                        }
                     }
                 } 
-                
-                // --- Scenario 4: One Hand Visible (Shape Change) ---
                 else if (handsArr.length === 1) {
+                    // --- SHAPE CHANGE MODE ---
+                    setActiveIcon("idle");
+                    baselineDist = null; // Reset baseline when one hand is lost
                     const hand = handsArr[0];
+                    
                     if (isPalm(hand)) {
-                        statusDiv.innerText = "STATUS: OPEN PALM";
-                        gestureDiv.innerText = "HOLD TO CHANGE SHAPE...";
-
                         if (palmHoldStart === 0) palmHoldStart = Date.now();
-                        const holdTime = (Date.now() - palmHoldStart) / 1000;
-
-                        if (holdTime > 1.5) {
-                            scene.remove(activeMesh);
+                        if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
+                            scene.remove(activeMeshGroup);
                             currentShapeIndex = (currentShapeIndex + 1) % geometries.length;
-                            activeMesh = new THREE.Mesh(geometries[currentShapeIndex], materials[currentShapeIndex]);
-                            scene.add(activeMesh);
+                            activeMeshGroup = new THREE.Group();
+                            activeMeshGroup.add(new THREE.Mesh(geometries[currentShapeIndex], holoMatCore));
+                            activeMeshGroup.add(new THREE.Mesh(geometries[currentShapeIndex], holoMatWire));
+                            activeMeshGroup.add(particles);
+                            scene.add(activeMeshGroup);
                             palmHoldStart = 0; 
-                            statusDiv.innerText = "STATUS: SHAPE CHANGED!";
                         }
                     } else {
                         palmHoldStart = 0;
-                        statusDiv.innerText = "STATUS: 1 HAND TRACKING";
-                        gestureDiv.innerText = "SHOW 2 HANDS TO SCALE, OR FIST TO ROTATE";
                     }
                 }
             } else {
                 palmHoldStart = 0;
-                statusDiv.innerText = "STATUS: NO HANDS";
-                gestureDiv.innerText = "SHOW HANDS TO CAMERA";
+                baselineDist = null;
+                setActiveIcon("idle");
             }
         }
 
         // --- Animation Loop (Smoothing Engine) ---
         function animate() {
             requestAnimationFrame(animate);
+            const smoothFactor = 0.2; // Snappy but smooth
             
-            // Deterministic Exponential Smoothing
-            const smoothFactor = 0.15;
-            activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
-            
-            // Lerp rotation for buttery smooth transition
-            activeMesh.rotation.x += (targetRotX - activeMesh.rotation.x) * smoothFactor;
-            activeMesh.rotation.y += (targetRotY - activeMesh.rotation.y) * smoothFactor;
-            activeMesh.rotation.z += (targetRotZ - activeMesh.rotation.z) * smoothFactor;
+            if (activeMeshGroup) {
+                activeMeshGroup.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
+                activeMeshGroup.rotation.x += (targetRotX - activeMeshGroup.rotation.x) * smoothFactor;
+                activeMeshGroup.rotation.y += (targetRotY - activeMeshGroup.rotation.y) * smoothFactor;
+                activeMeshGroup.rotation.z += (targetRotZ - activeMeshGroup.rotation.z) * smoothFactor;
 
+                // Animate particles
+                particles.rotation.y += 0.002;
+                particles.rotation.x += 0.001;
+            }
+            
             renderer.render(scene, camera);
         }
         animate();
 
-        // --- Resize ---
         function onResize() {
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
@@ -258,7 +289,6 @@
         }
         window.addEventListener('resize', onResize);
 
-        // Start
         initHands();
     </script>
 </body>
