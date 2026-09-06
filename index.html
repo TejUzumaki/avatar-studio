@@ -33,7 +33,6 @@
         .spinner { border: 2px solid rgba(255, 145, 0, 0.2); border-top: 2px solid #ff9100; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
-        /* Custom Sci-Fi Prompt Modal */
         #modal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 50; display: none; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
         #modal-box { background: rgba(15, 15, 25, 0.9); border: 1px solid #00ffff; padding: 30px; text-align: center; max-width: 320px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.2); }
         #modal-text { color: #00ffff; font-size: 14px; margin-bottom: 25px; line-height: 1.5; }
@@ -46,7 +45,6 @@
 <body>
     <div id="loader"><div class="spinner"></div></div>
 
-    <!-- Custom Modal -->
     <div id="modal-overlay">
         <div id="modal-box" class="clip-corner">
             <div id="modal-text">Message</div>
@@ -129,65 +127,36 @@
             modalOverlay.style.display = 'flex';
         }
 
-        // --- IndexedDB Smart Caching ---
-        let db;
+        // --- LIGHTWEIGHT LOCAL STORAGE (Name Only) ---
+        let savedModelNames = JSON.parse(localStorage.getItem('holo_model_names') || '[]');
         let pendingModelName = null;
-        const dbRequest = indexedDB.open('HoloModelDB', 1);
-        dbRequest.onupgradeneeded = (e) => {
-            db = e.target.result;
-            if (!db.objectStoreNames.contains('models')) db.createObjectStore('models', { keyPath: 'name' });
-        };
-        dbRequest.onsuccess = (e) => { 
-            db = e.target.result; 
+
+        function addModelName(name) {
+            if (!savedModelNames.includes(name)) {
+                savedModelNames.push(name);
+                localStorage.setItem('holo_model_names', JSON.stringify(savedModelNames));
+            }
             renderImportList();
-            // SESSION PERSISTENCE: Load last used model on boot
-            const lastModel = localStorage.getItem('last_loaded_model');
-            if (lastModel) loadModelFromDB(lastModel);
-        };
-
-        function saveModelToDB(name, blob) {
-            if (!db) return;
-            try {
-                const tx = db.transaction('models', 'readwrite');
-                tx.objectStore('models').put({ name, blob });
-                tx.onerror = () => showModal("Model is too large to cache permanently in browser storage.", [{text: "OK"}]);
-            } catch (err) { console.error("Cache error:", err); }
-        }
-
-        function loadModelFromDB(name) {
-            if (!db) return;
-            const tx = db.transaction('models', 'readonly');
-            const req = tx.objectStore('models').get(name);
-            req.onsuccess = (e) => {
-                if (e.target.result) {
-                    const url = URL.createObjectURL(e.target.result.blob);
-                    loadCustomGLTF(url, name);
-                }
-            };
         }
 
         function renderImportList() {
-            if (!db) return;
-            const tx = db.transaction('models', 'readonly');
-            const req = tx.objectStore('models').getAllKeys();
-            req.onsuccess = (e) => {
-                const list = document.getElementById('import-list');
-                list.innerHTML = '';
-                e.target.result.forEach(name => {
-                    const btn = document.createElement('button');
-                    btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
-                    btn.className = 'import-item clip-corner';
-                    btn.onclick = () => {
-                        pendingModelName = name;
-                        showModal(`"${name}" is not in active memory. Load from cache?`, [
-                            { text: "Load", color: "cyan", onClick: () => { loadModelFromDB(pendingModelName); pendingModelName = null; } },
-                            { text: "Cancel", onClick: () => { pendingModelName = null; } }
-                        ]);
-                    };
-                    list.appendChild(btn);
-                });
-            };
+            const list = document.getElementById('import-list');
+            list.innerHTML = '';
+            savedModelNames.forEach(name => {
+                const btn = document.createElement('button');
+                btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
+                btn.className = 'import-item clip-corner';
+                btn.onclick = () => {
+                    pendingModelName = name;
+                    showModal(`"${name}" is not in active memory. Load from storage?`, [
+                        { text: "Load", color: "cyan", onClick: () => { document.getElementById('file-input').click(); } },
+                        { text: "Cancel", onClick: () => { pendingModelName = null; } }
+                    ]);
+                };
+                list.appendChild(btn);
+            });
         }
+        renderImportList();
 
         // --- Three.js Iron Man Environment ---
         const scene = new THREE.Scene();
@@ -296,7 +265,8 @@
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
-            saveModelToDB(file.name, file);
+            pendingModelName = null;
+            addModelName(file.name);
             const url = URL.createObjectURL(file);
             loadCustomGLTF(url, file.name);
         });
@@ -353,7 +323,7 @@
             action.reset();
             action.setEffectiveTimeScale(1);
             action.setEffectiveWeight(1);
-            action.fadeIn(0.5).play(); // Smooth fade, never returns to T-pose
+            action.fadeIn(0.5).play(); 
             currentAnimIndex = (currentAnimIndex + 1) % animations.length;
         }
 
@@ -475,10 +445,9 @@
                     scaleModeActive = false; rotModeActive = false;
                     const hand = handsArr[0];
                     
-                    // PEACE SIGN GESTURE FOR ANIMATION CYCLING
                     if (isPeace(hand)) {
                         const now = Date.now();
-                        if (now - lastAnimSwitch > 1000) { // 1s cooldown to prevent spamming
+                        if (now - lastAnimSwitch > 1000) { 
                             if (isCustomModelLoaded && animations.length > 0) {
                                 playNextAnimation();
                                 lastAnimSwitch = now;
@@ -543,9 +512,23 @@
 
         // Initial Boot Check
         checkOrientation();
-        showModal("Welcome to Hologram Interface. Ensure your device is in landscape mode and camera permissions are granted.", [
-            { text: "INITIALIZE", color: "cyan", onClick: startApp }
-        ]);
+
+        // Check if a model was loaded in the previous session
+        const lastModel = localStorage.getItem('last_loaded_model');
+        if (lastModel) {
+            showModal(`Previously you loaded "${lastModel}". Do you want to load it again?`, [
+                { text: "Load", color: "cyan", onClick: () => { 
+                    pendingModelName = lastModel; 
+                    document.getElementById('file-input').click(); 
+                    startApp(); 
+                }},
+                { text: "Cancel", onClick: startApp }
+            ]);
+        } else {
+            showModal("Welcome to Hologram Interface. Ensure your device is in landscape mode and camera permissions are granted.", [
+                { text: "INITIALIZE", color: "cyan", onClick: startApp }
+            ]);
+        }
 
     </script>
 </body>
