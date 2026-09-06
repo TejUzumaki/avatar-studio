@@ -246,7 +246,7 @@
         ];
 
         let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
-        holoPivot.add(activeMesh); // Add to pivot instead of scene
+        holoPivot.add(activeMesh); 
 
         // --- GLTF Import Logic ---
         const gltfLoader = new GLTFLoader();
@@ -262,7 +262,6 @@
 
         function loadCustomGLTF(url, name) {
             gltfLoader.load(url, (gltf) => {
-                // Clear pivot
                 while(holoPivot.children.length > 0){ holoPivot.remove(holoPivot.children[0]); }
                 activeMesh = gltf.scene;
                 
@@ -276,7 +275,6 @@
                 const maxDim = Math.max(0.1, size.x, size.y, size.z);
                 const baseScale = 1.5 / maxDim;
                 
-                // Scale model and offset its position to center it perfectly inside the pivot
                 activeMesh.scale.setScalar(baseScale);
                 activeMesh.position.x = -center.x * baseScale;
                 activeMesh.position.y = -center.y * baseScale;
@@ -284,7 +282,6 @@
                 
                 holoPivot.add(activeMesh);
                 
-                // Reset pivot transforms to prevent snapping on load
                 targetScale = 1.0;
                 targetRotX = 0; targetRotY = 0; targetRotZ = 0;
                 holoPivot.scale.set(1, 1, 1);
@@ -401,7 +398,6 @@
                                 rotBaselineHandX = handX;
                                 rotBaselineHandY = handY;
                                 rotBaselineHandAngle = handAngle;
-                                // Read rotation from holoPivot now
                                 rotBaselineModelX = holoPivot.rotation.x;
                                 rotBaselineModelY = holoPivot.rotation.y;
                                 rotBaselineModelZ = holoPivot.rotation.z;
@@ -420,7 +416,6 @@
                         if (!scaleModeActive) {
                             scaleModeActive = true;
                             scaleBaselineDist = dist;
-                            // Read scale from holoPivot now
                             scaleBaselineModelScale = holoPivot.scale.x; 
                         } else {
                             const scaleRatio = dist / scaleBaselineDist;
@@ -448,6 +443,11 @@
                 scaleModeActive = false;
                 rotModeActive = false;
                 setActiveIcon("idle");
+                
+                // UPDATE 3: Smoothly return to default rotation when hands are removed, but KEEP scale
+                targetRotX = 0;
+                targetRotY = 0;
+                targetRotZ = 0;
             }
         }
 
@@ -461,7 +461,6 @@
             holoMaterial.uniforms.uTime.value = elapsed;
             
             const smoothFactor = 0.2;
-            // Apply transforms to holoPivot instead of activeMesh
             holoPivot.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
             holoPivot.rotation.x += (targetRotX - holoPivot.rotation.x) * smoothFactor;
             holoPivot.rotation.y += (targetRotY - holoPivot.rotation.y) * smoothFactor;
