@@ -168,7 +168,6 @@
                     const btn = document.createElement('button');
                     btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
                     btn.className = 'import-item clip-corner';
-                    // DIRECTLY load from cache without a prompt
                     btn.onclick = () => loadModelFromDB(name);
                     list.appendChild(btn);
                 });
@@ -186,7 +185,7 @@
 
         const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Optimization cap
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
 
         scene.add(new THREE.AmbientLight(0x00ffff, 0.2));
         const spotLight = new THREE.SpotLight(0x00ffff, 2.5);
@@ -271,12 +270,15 @@
         let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
         holoPivot.add(activeMesh); 
 
-        // --- Animation State ---
+        // --- Smart Animation State ---
         let mixer = null;
         let animations = [];
         let currentAnimIndex = 0;
+        let currentAction = null;
         let isCustomModelLoaded = false;
         let lastAnimSwitch = 0;
+        let autoAnimTimer = null;
+        let lastHandSeenTime = Date.now();
 
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
@@ -313,11 +315,17 @@
                 holoPivot.rotation.set(0,0,0);
 
                 if (mixer) mixer.stopAllAction();
+                if (autoAnimTimer) clearTimeout(autoAnimTimer);
                 animations = gltf.animations;
+                
                 if (animations.length > 0) {
                     mixer = new THREE.AnimationMixer(activeMesh);
                     isCustomModelLoaded = true;
-                    playNextAnimation();
+                    // Auto start animations after 5 seconds
+                    setTimeout(() => {
+                        playNextAnimation();
+                        scheduleNextAutoAnim();
+                    }, 5000);
                 } else {
                     mixer = null;
                     isCustomModelLoaded = true;
@@ -332,14 +340,34 @@
 
         function playNextAnimation() {
             if (!mixer || animations.length === 0) return;
-            mixer.stopAllAction();
-            const clip = animations[currentAnimIndex];
-            const action = mixer.clipAction(clip);
-            action.reset();
-            action.setEffectiveTimeScale(1);
-            action.setEffectiveWeight(1);
-            action.fadeIn(0.5).play();
-            currentAnimIndex = (currentAnimIndex + 1) % animations.length;
+            
+            if (currentAction) currentAction.fadeOut(0.5);
+
+            // Random selection if > 5 animations
+            if (animations.length > 5) {
+                let randIdx = Math.floor(Math.random() * animations.length);
+                if (randIdx === currentAnimIndex) randIdx = (randIdx + 1) % animations.length;
+                currentAnimIndex = randIdx;
+            } else {
+                currentAnimIndex = (currentAnimIndex + 1) % animations.length;
+            }
+
+            currentAction = mixer.clipAction(animations[currentAnimIndex]);
+            currentAction.reset();
+            currentAction.setEffectiveTimeScale(1);
+            currentAction.setEffectiveWeight(1);
+            currentAction.fadeIn(0.5).play();
+        }
+
+        function scheduleNextAutoAnim() {
+            if (autoAnimTimer) clearTimeout(autoAnimTimer);
+            if (!mixer || animations.length === 0) return;
+            
+            const duration = currentAction && currentAction.getClip().duration ? currentAction.getClip().duration * 1000 : 5000;
+            autoAnimTimer = setTimeout(() => {
+                playNextAnimation();
+                scheduleNextAutoAnim();
+            }, duration);
         }
 
         let targetScale = 1.0;
@@ -358,7 +386,8 @@
             holoPivot.add(activeMesh);
             
             if (mixer) mixer.stopAllAction();
-            mixer = null; animations = []; isCustomModelLoaded = false;
+            if (autoAnimTimer) clearTimeout(autoAnimTimer);
+            mixer = null; animations = []; isCustomModelLoaded = false; currentAction = null;
             
             targetScale = 1.0; targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             scaleModeActive = false; rotModeActive = false;
@@ -408,6 +437,7 @@
             }
 
             if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                lastHandSeenTime = Date.now();
                 const handsArr = results.multiHandLandmarks;
                 
                 if (handsArr.length === 2) {
@@ -429,9 +459,20 @@
                                 rotBaselineHandX = handX; rotBaselineHandY = handY; rotBaselineHandAngle = handAngle;
                                 rotBaselineModelX = holoPivot.rotation.x; rotBaselineModelY = holoPivot.rotation.y; rotBaselineModelZ = holoPivot.rotation.z;
                             } else {
-                                targetRotY = rotBaselineModelY + (handX - rotBaselineHandX) * Math.PI * 3;
-                                targetRotX = rotBaselineModelX - (handY - rotBaselineHandY) * Math.PI * 3; 
-                                targetRotZ = rotBaselineModelZ + (handAngle - rotBaselineHandAngle);
+                                // SMART HUMANOID LOCK: If it has animations, ONLY rotate on Y axis
+                                const isHumanoid = isCustomModelLoaded && animations.length > 0;
+
+                                if (isHumanoid) {
+                                    // Inverted X for correct right/left mapping. Y is ignored.
+                                    targetRotY = rotBaselineModelY - (handX - rotBaselineHandX) * Math.PI * 3;
+                                    targetRotX = rotBaselineModelX; // Locked
+                                    targetRotZ = rotBaselineModelZ; // Locked
+                                } else {
+                                    // Primitives keep all 3 axes
+                                    targetRotY = rotBaselineModelY - (handX - rotBaselineHandX) * Math.PI * 3;
+                                    targetRotX = rotBaselineModelX - (handY - rotBaselineHandY) * Math.PI * 3; 
+                                    targetRotZ = rotBaselineModelZ + (handAngle - rotBaselineHandAngle);
+                                }
                             }
                         }
                     } else {
@@ -452,12 +493,12 @@
                     scaleModeActive = false; rotModeActive = false;
                     const hand = handsArr[0];
                     
-                    // PEACE SIGN GESTURE FOR ANIMATION CYCLING
                     if (isPeace(hand)) {
                         const now = Date.now();
                         if (now - lastAnimSwitch > 1000) { 
                             if (isCustomModelLoaded && animations.length > 0) {
                                 playNextAnimation();
+                                scheduleNextAutoAnim(); // Reset auto timer
                                 lastAnimSwitch = now;
                             }
                         }
@@ -465,7 +506,12 @@
                 }
             } else {
                 scaleModeActive = false; rotModeActive = false; setActiveIcon("idle");
-                targetRotX = 0; targetRotY = 0; targetRotZ = 0;
+                
+                // 10-Second Idle Timeout: Smoothly return to default position and scale
+                if (Date.now() - lastHandSeenTime > 10000) {
+                    targetRotX = 0; targetRotY = 0; targetRotZ = 0; 
+                    targetScale = 1.0;
+                }
             }
         }
 
@@ -478,7 +524,7 @@
             holoMaterial.uniforms.uTime.value = elapsed;
             if (mixer) mixer.update(delta);
             
-            const smoothFactor = 0.2;
+            const smoothFactor = 0.05;
             holoPivot.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
             holoPivot.rotation.x += (targetRotX - holoPivot.rotation.x) * smoothFactor;
             holoPivot.rotation.y += (targetRotY - holoPivot.rotation.y) * smoothFactor;
