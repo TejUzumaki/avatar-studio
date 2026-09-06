@@ -14,17 +14,16 @@
             clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
         }
 
-        /* Top Bar Container */
         #top-bar {
             position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            display: flex; align-items: center; gap: 15px; z-index: 10; max-width: 95%;
+            display: flex; align-items: flex-start; gap: 15px; z-index: 10; max-width: 95%;
         }
 
         #catalog-bar {
             display: flex; gap: 10px; overflow-x: auto;
             padding: 10px; background: rgba(15, 15, 25, 0.6);
             border: 1px solid rgba(255, 145, 0, 0.4); 
-            backdrop-filter: blur(8px);
+            backdrop-filter: blur(8px); max-height: 40px;
         }
         .catalog-btn {
             background: transparent; border: 1px solid rgba(255, 145, 0, 0.3);
@@ -33,14 +32,28 @@
         }
         .catalog-btn.active { background: rgba(255, 145, 0, 0.2); border-color: #ff9100; box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); }
 
-        /* Import Button */
+        /* Import Container */
+        #import-container { display: flex; flex-direction: column; gap: 5px; }
         #import-btn {
             background: rgba(15, 15, 25, 0.7); border: 1px solid #ff9100; color: #ff9100;
-            padding: 10px 15px; font-size: 12px; font-weight: bold; cursor: pointer;
+            padding: 0 15px; font-size: 12px; font-weight: bold; cursor: pointer;
             backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(255, 145, 0, 0.3);
             display: flex; align-items: center; justify-content: center; height: 40px;
         }
         #file-input { display: none; }
+
+        /* Import List */
+        #import-list {
+            display: flex; flex-direction: column; gap: 5px; margin-top: 5px;
+            max-height: 150px; overflow-y: auto; width: 120px;
+        }
+        .import-item {
+            background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(0, 255, 255, 0.3);
+            color: #00ffff; padding: 6px 10px; font-size: 10px; cursor: pointer;
+            text-align: left; transition: 0.2s; width: 100%; box-sizing: border-box;
+        }
+        .import-item:hover { background: rgba(0, 255, 255, 0.1); border-color: #00ffff; }
+        .import-item.active { background: rgba(0, 255, 255, 0.2); border-color: #00ffff; }
 
         #ui-dock {
             position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
@@ -64,7 +77,6 @@
     <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
-    <!-- Top Bar with Catalog and Import -->
     <div id="top-bar">
         <div id="catalog-bar" class="clip-corner">
             <button class="catalog-btn active" onclick="selectShape(0)">CUBE</button>
@@ -77,8 +89,11 @@
             <button class="catalog-btn" onclick="selectShape(7)">CYLIN</button>
             <button class="catalog-btn" onclick="selectShape(8)">TETRA</button>
         </div>
-        <input type="file" id="file-input" accept=".glb,.gltf">
-        <button id="import-btn" class="clip-corner" onclick="document.getElementById('file-input').click()">IMPORT</button>
+        <div id="import-container">
+            <input type="file" id="file-input" accept=".glb,.gltf">
+            <button id="import-btn" class="clip-corner" onclick="document.getElementById('file-input').click()">IMPORT</button>
+            <div id="import-list"></div>
+        </div>
     </div>
 
     <div id="ui-dock" class="clip-corner">
@@ -115,6 +130,52 @@
             if (icons[name]) icons[name].classList.add('active');
         }
 
+        // --- IndexedDB Setup for Caching Models ---
+        let db;
+        const dbRequest = indexedDB.open('HoloModelDB', 1);
+        dbRequest.onupgradeneeded = (e) => {
+            db = e.target.result;
+            if (!db.objectStoreNames.contains('models')) {
+                db.createObjectStore('models', { keyPath: 'name' });
+            }
+        };
+        dbRequest.onsuccess = (e) => {
+            db = e.target.result;
+            renderImportList();
+        };
+
+        function saveModelToDB(name, blob) {
+            const tx = db.transaction('models', 'readwrite');
+            tx.objectStore('models').put({ name, blob });
+            tx.oncomplete = renderImportList;
+        }
+
+        function loadModelFromDB(name) {
+            const tx = db.transaction('models', 'readonly');
+            const req = tx.objectStore('models').get(name);
+            req.onsuccess = (e) => {
+                const url = URL.createObjectURL(e.target.result.blob);
+                loadCustomGLTF(url, name);
+            };
+        }
+
+        function renderImportList() {
+            if (!db) return;
+            const tx = db.transaction('models', 'readonly');
+            const req = tx.objectStore('models').getAll();
+            req.onsuccess = (e) => {
+                const list = document.getElementById('import-list');
+                list.innerHTML = '';
+                e.target.result.forEach(item => {
+                    const btn = document.createElement('button');
+                    btn.innerText = item.name.length > 15 ? item.name.substring(0, 12) + '...' : item.name;
+                    btn.className = 'import-item clip-corner';
+                    btn.onclick = () => loadModelFromDB(item.name);
+                    list.appendChild(btn);
+                });
+            };
+        }
+
         // --- Three.js Setup ---
         const scene = new THREE.Scene();
         const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
@@ -129,7 +190,7 @@
         dirLight.position.set(2, 2, 3);
         scene.add(dirLight);
 
-        // --- INTEGRATED 3D Holographic Shader ---
+        // --- INTEGRATED CUSTOM HOLOGRAPHIC SHADER ---
         const holographicVertexShader = `
             uniform float uTime;
             uniform float uGlitchIntensity;
@@ -202,15 +263,15 @@
             uniforms: {
                 uTime: { value: 0 },
                 uColor: { value: new THREE.Color('#00ffff') },
-                uAlpha: { value: 0.98 },
-                uFresnelPower: { value: 8 },
-                uFresnelIntensity: { value: 0.3 },
-                uScanlineFrequency: { value: 6 },
+                uAlpha: { value: 0.23 },
+                uFresnelPower: { value: 0.5 },
+                uFresnelIntensity: { value: 1.1 },
+                uScanlineFrequency: { value: 75 },
                 uScanlineSpeed: { value: 15 },
-                uGlitchIntensity: { value: 0.05 },
-                uGlitchFrequency: { value: 20 },
+                uGlitchIntensity: { value: 0.08 },
+                uGlitchFrequency: { value: 0 },
                 uRippleFrequency: { value: 0 },
-                uRippleSpeed: { value: 1.3 },
+                uRippleSpeed: { value: 0 },
                 uRippleHeight: { value: 0 }
             },
             transparent: true,
@@ -237,11 +298,16 @@
 
         // --- GLTF Import Logic ---
         const gltfLoader = new GLTFLoader();
+        
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
+            saveModelToDB(file.name, file);
             const url = URL.createObjectURL(file);
-            
+            loadCustomGLTF(url, file.name);
+        });
+
+        function loadCustomGLTF(url, name) {
             gltfLoader.load(url, (gltf) => {
                 scene.remove(activeMesh);
                 activeMesh = gltf.scene;
@@ -254,15 +320,24 @@
                 const size = box.getSize(new THREE.Vector3());
                 const center = box.getCenter(new THREE.Vector3());
                 const maxDim = Math.max(size.x, size.y, size.z);
-                activeMesh.scale.multiplyScalar(1.5 / maxDim);
-                activeMesh.position.sub(center.multiplyScalar(1.5 / maxDim));
+                activeMesh.userData.baseScale = 1.5 / maxDim;
+                activeMesh.scale.setScalar(activeMesh.userData.baseScale);
+                activeMesh.position.sub(center.multiplyScalar(activeMesh.userData.baseScale));
                 
                 scene.add(activeMesh);
                 
-                // Deselect catalog buttons
+                // Reset transforms to prevent snapping on load
+                targetScale = activeMesh.userData.baseScale;
+                targetRotX = 0; targetRotY = 0; targetRotZ = 0;
+                activeMesh.rotation.set(0,0,0);
+
+                // Highlight active imported item
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelectorAll('.import-item').forEach(btn => {
+                    btn.classList.toggle('active', btn.innerText === name || name.includes(btn.innerText));
+                });
             });
-        });
+        }
 
         // --- Particle Aura ---
         const particleCount = 200;
@@ -279,18 +354,32 @@
         let currentShapeIndex = 0;
         let targetRotX = 0.0, targetRotY = 0.0, targetRotZ = 0.0;
         let palmHoldStart = 0;
-        let baselineDist = null;
+
+        // Baseline tracking to prevent snapping
+        let scaleModeActive = false;
+        let scaleBaselineDist = 0;
+        let scaleBaselineModelScale = 1.0;
+
+        let rotModeActive = false;
+        let rotBaselineHandX = 0, rotBaselineHandY = 0, rotBaselineHandAngle = 0;
+        let rotBaselineModelX = 0, rotBaselineModelY = 0, rotBaselineModelZ = 0;
 
         window.selectShape = function(index) {
             if (index === currentShapeIndex) return;
             scene.remove(activeMesh);
             currentShapeIndex = index;
             activeMesh = new THREE.Mesh(geometries[index], holoMaterial);
+            activeMesh.userData.baseScale = 1.0;
             scene.add(activeMesh);
+            
+            targetScale = 1.0;
+            targetRotX = 0; targetRotY = 0; targetRotZ = 0;
+            scaleModeActive = false; rotModeActive = false;
             
             document.querySelectorAll('.catalog-btn').forEach((btn, i) => {
                 btn.classList.toggle('active', i === index);
             });
+            document.querySelectorAll('.import-item').forEach(btn => btn.classList.remove('active'));
         }
 
         // --- Hand Tracking ---
@@ -341,30 +430,58 @@
                     const h1Fist = isFist(h1), h2Fist = isFist(h2);
 
                     if (h1Fist || h2Fist) {
+                        // --- ROTATE MODE (DELTA BASED) ---
                         setActiveIcon("rotate");
+                        scaleModeActive = false; // Reset scale baseline when switching modes
                         const rotHand = h1Fist ? h2 : h1;
+                        
                         if (!isFist(rotHand)) {
-                            targetRotY = (rotHand[0].x - 0.5) * Math.PI * 3;
-                            targetRotX = (rotHand[0].y - 0.5) * Math.PI * 3;
+                            const handX = rotHand[0].x;
+                            const handY = rotHand[0].y;
                             const wrist = rotHand[0], pinkyMcp = rotHand[17];
-                            targetRotZ = Math.atan2(pinkyMcp.y - wrist.y, pinkyMcp.x - wrist.x) - Math.PI/2;
+                            const handAngle = Math.atan2(pinkyMcp.y - wrist.y, pinkyMcp.x - wrist.x);
+
+                            if (!rotModeActive) {
+                                // Capture the starting state of hand and model
+                                rotModeActive = true;
+                                rotBaselineHandX = handX;
+                                rotBaselineHandY = handY;
+                                rotBaselineHandAngle = handAngle;
+                                rotBaselineModelX = activeMesh.rotation.x;
+                                rotBaselineModelY = activeMesh.rotation.y;
+                                rotBaselineModelZ = activeMesh.rotation.z;
+                            } else {
+                                // Apply only the difference (delta) from the baseline
+                                targetRotY = rotBaselineModelY + (handX - rotBaselineHandX) * Math.PI * 3;
+                                targetRotX = rotBaselineModelX - (handY - rotBaselineHandY) * Math.PI * 3; // Inverted Y
+                                targetRotZ = rotBaselineModelZ + (handAngle - rotBaselineHandAngle);
+                            }
                         }
                     } else {
+                        // --- SCALE MODE (DELTA BASED) ---
                         setActiveIcon("scale");
+                        rotModeActive = false; // Reset rot baseline when switching modes
                         const wrist1 = h1[0], wrist2 = h2[0];
                         const dist = Math.hypot(wrist1.x - wrist2.x, wrist1.y - wrist2.y, wrist1.z - wrist2.z);
                         
-                        if (baselineDist === null) {
-                            baselineDist = dist;
-                            targetScale = 1.0; 
-                            targetRotX = 0; targetRotY = 0; targetRotZ = 0; 
+                        if (!scaleModeActive) {
+                            // Capture starting hand distance and model scale
+                            scaleModeActive = true;
+                            scaleBaselineDist = dist;
+                            scaleBaselineModelScale = activeMesh.scale.x; // Current scale
                         } else {
-                            targetScale = Math.max(0.3, Math.min((dist / baselineDist) * 1.2, 3.5));
+                            // Calculate ratio of current dist to baseline dist
+                            const scaleRatio = dist / scaleBaselineDist;
+                            const baseScale = activeMesh.userData.baseScale || 1.0;
+                            // Target = original baseline model scale * ratio
+                            targetScale = Math.max(0.2, Math.min(scaleBaselineModelScale * scaleRatio, baseScale * 4.0));
                         }
                     }
                 } else if (handsArr.length === 1) {
+                    // --- IDLE / SHAPE CHANGE MODE ---
                     setActiveIcon("idle");
-                    baselineDist = null;
+                    scaleModeActive = false;
+                    rotModeActive = false;
                     const hand = handsArr[0];
                     
                     if (isPalm(hand)) {
@@ -379,7 +496,8 @@
                 }
             } else {
                 palmHoldStart = 0;
-                baselineDist = null;
+                scaleModeActive = false;
+                rotModeActive = false;
                 setActiveIcon("idle");
             }
         }
@@ -394,15 +512,7 @@
             holoMaterial.uniforms.uTime.value = elapsed;
             
             const smoothFactor = 0.2;
-            // Custom scale logic for imported GLTF vs Primitives
-            if (activeMesh.isMesh) {
-                activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
-            } else {
-                // Preserve the base scale of the GLTF and multiply by target scale
-                const baseScale = 1.5 / activeMesh.userData.baseSize || 1; 
-                activeMesh.scale.lerp(new THREE.Vector3(baseScale * targetScale, baseScale * targetScale, baseScale * targetScale), smoothFactor);
-            }
-            
+            activeMesh.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
             activeMesh.rotation.x += (targetRotX - activeMesh.rotation.x) * smoothFactor;
             activeMesh.rotation.y += (targetRotY - activeMesh.rotation.y) * smoothFactor;
             activeMesh.rotation.z += (targetRotZ - activeMesh.rotation.z) * smoothFactor;
