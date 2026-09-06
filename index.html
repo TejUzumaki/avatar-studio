@@ -35,10 +35,12 @@
 
         /* Custom Sci-Fi Prompt Modal */
         #modal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 50; display: none; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
-        #modal-box { background: rgba(15, 15, 25, 0.9); border: 1px solid #00ffff; padding: 30px; text-align: center; max-width: 300px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.2); }
-        #modal-text { color: #00ffff; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
-        .modal-btn { background: transparent; border: 1px solid #ff9100; color: #ff9100; padding: 10px 20px; font-weight: bold; cursor: pointer; margin: 0 10px; transition: 0.2s; }
+        #modal-box { background: rgba(15, 15, 25, 0.9); border: 1px solid #00ffff; padding: 30px; text-align: center; max-width: 320px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.2); }
+        #modal-text { color: #00ffff; font-size: 14px; margin-bottom: 25px; line-height: 1.5; }
+        .modal-btn { background: transparent; border: 1px solid #ff9100; color: #ff9100; padding: 10px 20px; font-weight: bold; cursor: pointer; margin: 0 5px; transition: 0.2s; }
         .modal-btn:hover { background: rgba(255, 145, 0, 0.2); }
+        .modal-btn.cyan { border-color: #00ffff; color: #00ffff; }
+        .modal-btn.cyan:hover { background: rgba(0, 255, 255, 0.2); }
     </style>
 </head>
 <body>
@@ -47,9 +49,8 @@
     <!-- Custom Modal -->
     <div id="modal-overlay">
         <div id="modal-box" class="clip-corner">
-            <div id="modal-text">Model not in active memory. Load from cache?</div>
-            <button id="modal-yes" class="modal-btn clip-corner">Load</button>
-            <button id="modal-no" class="modal-btn clip-corner">Cancel</button>
+            <div id="modal-text">Message</div>
+            <div id="modal-buttons"></div>
         </div>
     </div>
 
@@ -110,6 +111,24 @@
             if (icons[name]) icons[name].classList.add('active');
         }
 
+        // --- Custom Modal Logic ---
+        const modalOverlay = document.getElementById('modal-overlay');
+        const modalText = document.getElementById('modal-text');
+        const modalButtons = document.getElementById('modal-buttons');
+
+        function showModal(text, buttons) {
+            modalText.innerText = text;
+            modalButtons.innerHTML = '';
+            buttons.forEach(btn => {
+                const b = document.createElement('button');
+                b.innerText = btn.text;
+                b.className = `modal-btn clip-corner ${btn.color || ''}`;
+                b.onclick = () => { modalOverlay.style.display = 'none'; if(btn.onClick) btn.onClick(); };
+                modalButtons.appendChild(b);
+            });
+            modalOverlay.style.display = 'flex';
+        }
+
         // --- IndexedDB Smart Caching ---
         let db;
         let pendingModelName = null;
@@ -118,17 +137,21 @@
             db = e.target.result;
             if (!db.objectStoreNames.contains('models')) db.createObjectStore('models', { keyPath: 'name' });
         };
-        dbRequest.onsuccess = (e) => { db = e.target.result; renderImportList(); };
+        dbRequest.onsuccess = (e) => { 
+            db = e.target.result; 
+            renderImportList();
+            // SESSION PERSISTENCE: Load last used model on boot
+            const lastModel = localStorage.getItem('last_loaded_model');
+            if (lastModel) loadModelFromDB(lastModel);
+        };
 
         function saveModelToDB(name, blob) {
             if (!db) return;
             try {
                 const tx = db.transaction('models', 'readwrite');
                 tx.objectStore('models').put({ name, blob });
-                tx.onerror = () => alert("Model too large to cache permanently.");
-            } catch (err) {
-                console.error("Cache error:", err);
-            }
+                tx.onerror = () => showModal("Model is too large to cache permanently in browser storage.", [{text: "OK"}]);
+            } catch (err) { console.error("Cache error:", err); }
         }
 
         function loadModelFromDB(name) {
@@ -156,23 +179,15 @@
                     btn.className = 'import-item clip-corner';
                     btn.onclick = () => {
                         pendingModelName = name;
-                        document.getElementById('modal-text').innerText = `"${name}" is not in active memory. Load from cache?`;
-                        document.getElementById('modal-overlay').style.display = 'flex';
+                        showModal(`"${name}" is not in active memory. Load from cache?`, [
+                            { text: "Load", color: "cyan", onClick: () => { loadModelFromDB(pendingModelName); pendingModelName = null; } },
+                            { text: "Cancel", onClick: () => { pendingModelName = null; } }
+                        ]);
                     };
                     list.appendChild(btn);
                 });
             };
         }
-
-        document.getElementById('modal-yes').onclick = () => {
-            document.getElementById('modal-overlay').style.display = 'none';
-            if (pendingModelName) loadModelFromDB(pendingModelName);
-            pendingModelName = null;
-        };
-        document.getElementById('modal-no').onclick = () => {
-            document.getElementById('modal-overlay').style.display = 'none';
-            pendingModelName = null;
-        };
 
         // --- Three.js Iron Man Environment ---
         const scene = new THREE.Scene();
@@ -185,7 +200,7 @@
 
         const renderer = new THREE.WebGLRenderer({ canvas: threeCanvas, antialias: true, alpha: true });
         renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Optimization cap
 
         scene.add(new THREE.AmbientLight(0x00ffff, 0.2));
         const spotLight = new THREE.SpotLight(0x00ffff, 2.5);
@@ -275,6 +290,7 @@
         let animations = [];
         let currentAnimIndex = 0;
         let isCustomModelLoaded = false;
+        let lastAnimSwitch = 0;
 
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
@@ -310,16 +326,16 @@
                 holoPivot.scale.set(1, 1, 1);
                 holoPivot.rotation.set(0,0,0);
 
-                // Setup Animations
                 if (mixer) mixer.stopAllAction();
                 animations = gltf.animations;
+                isCustomModelLoaded = true;
+                localStorage.setItem('last_loaded_model', name); // Save session
+
                 if (animations.length > 0) {
                     mixer = new THREE.AnimationMixer(activeMesh);
-                    isCustomModelLoaded = true;
                     playNextAnimation();
                 } else {
                     mixer = null;
-                    isCustomModelLoaded = true;
                 }
 
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
@@ -337,14 +353,13 @@
             action.reset();
             action.setEffectiveTimeScale(1);
             action.setEffectiveWeight(1);
-            action.fadeIn(0.5).play();
+            action.fadeIn(0.5).play(); // Smooth fade, never returns to T-pose
             currentAnimIndex = (currentAnimIndex + 1) % animations.length;
         }
 
         let targetScale = 1.0;
         let currentShapeIndex = 0;
         let targetRotX = 0.0, targetRotY = 0.0, targetRotZ = 0.0;
-        let palmHoldStart = 0;
 
         let scaleModeActive = false, scaleBaselineDist = 0, scaleBaselineModelScale = 1.0;
         let rotModeActive = false, rotBaselineHandX = 0, rotBaselineHandY = 0, rotBaselineHandAngle = 0;
@@ -357,14 +372,11 @@
             activeMesh = new THREE.Mesh(geometries[index], holoMaterial);
             holoPivot.add(activeMesh);
             
-            // Reset animation state
             if (mixer) mixer.stopAllAction();
-            mixer = null;
-            animations = [];
-            isCustomModelLoaded = false;
+            mixer = null; animations = []; isCustomModelLoaded = false;
+            localStorage.removeItem('last_loaded_model'); // Clear session
             
-            targetScale = 1.0;
-            targetRotX = 0; targetRotY = 0; targetRotZ = 0;
+            targetScale = 1.0; targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             scaleModeActive = false; rotModeActive = false;
             
             document.querySelectorAll('.catalog-btn').forEach((btn, i) => btn.classList.toggle('active', i === index));
@@ -382,12 +394,19 @@
 
         async function startRawCamera() {
             try {
+                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                    showModal("No camera detected. Please ensure your device has a camera and is not being used by another app.", [{text: "OK"}]);
+                    return;
+                }
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
                 video.srcObject = stream;
                 await video.play();
                 loader.style.display = 'none';
                 processFrame();
-            } catch (err) { console.error("Camera error:", err); }
+            } catch (err) { 
+                console.error("Camera error:", err);
+                showModal("Camera access denied or failed. Please check browser permissions.", [{text: "OK"}]);
+            }
         }
 
         async function processFrame() {
@@ -397,13 +416,13 @@
 
         function isFist(lm) { return lm[8].y > lm[6].y && lm[12].y > lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y; }
         function isPalm(lm) { return lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y < lm[14].y && lm[20].y < lm[18].y; }
+        function isPeace(lm) { return lm[8].y < lm[6].y && lm[12].y < lm[10].y && lm[16].y > lm[14].y && lm[20].y > lm[18].y; }
 
         function onResults(results) {
             overlayCanvas.width = window.innerWidth;
             overlayCanvas.height = window.innerHeight;
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             
-            // Made dots and lines thicker/brighter
             if (results.multiHandLandmarks) {
                 for (const landmarks of results.multiHandLandmarks) {
                     drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: 'rgba(255,255,255,0.9)', lineWidth: 3 });
@@ -415,7 +434,6 @@
                 const handsArr = results.multiHandLandmarks;
                 
                 if (handsArr.length === 2) {
-                    palmHoldStart = 0;
                     const h1 = handsArr[0], h2 = handsArr[1];
                     const h1Fist = isFist(h1), h2Fist = isFist(h2);
 
@@ -425,19 +443,14 @@
                         const rotHand = h1Fist ? h2 : h1;
                         
                         if (!isFist(rotHand)) {
-                            const handX = rotHand[0].x;
-                            const handY = rotHand[0].y;
+                            const handX = rotHand[0].x, handY = rotHand[0].y;
                             const wrist = rotHand[0], pinkyMcp = rotHand[17];
                             const handAngle = Math.atan2(pinkyMcp.y - wrist.y, pinkyMcp.x - wrist.x);
 
                             if (!rotModeActive) {
                                 rotModeActive = true;
-                                rotBaselineHandX = handX;
-                                rotBaselineHandY = handY;
-                                rotBaselineHandAngle = handAngle;
-                                rotBaselineModelX = holoPivot.rotation.x;
-                                rotBaselineModelY = holoPivot.rotation.y;
-                                rotBaselineModelZ = holoPivot.rotation.z;
+                                rotBaselineHandX = handX; rotBaselineHandY = handY; rotBaselineHandAngle = handAngle;
+                                rotBaselineModelX = holoPivot.rotation.x; rotBaselineModelY = holoPivot.rotation.y; rotBaselineModelZ = holoPivot.rotation.z;
                             } else {
                                 targetRotY = rotBaselineModelY + (handX - rotBaselineHandX) * Math.PI * 3;
                                 targetRotX = rotBaselineModelX - (handY - rotBaselineHandY) * Math.PI * 3; 
@@ -451,9 +464,7 @@
                         const dist = Math.hypot(wrist1.x - wrist2.x, wrist1.y - wrist2.y, wrist1.z - wrist2.z);
                         
                         if (!scaleModeActive) {
-                            scaleModeActive = true;
-                            scaleBaselineDist = dist;
-                            scaleBaselineModelScale = holoPivot.scale.x; 
+                            scaleModeActive = true; scaleBaselineDist = dist; scaleBaselineModelScale = holoPivot.scale.x; 
                         } else {
                             const scaleRatio = dist / scaleBaselineDist;
                             targetScale = Math.max(0.2, Math.min(scaleBaselineModelScale * scaleRatio, 4.0));
@@ -461,29 +472,22 @@
                     }
                 } else if (handsArr.length === 1) {
                     setActiveIcon("idle");
-                    scaleModeActive = false;
-                    rotModeActive = false;
+                    scaleModeActive = false; rotModeActive = false;
                     const hand = handsArr[0];
                     
-                    if (isPalm(hand)) {
-                        if (palmHoldStart === 0) palmHoldStart = Date.now();
-                        if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
-                            // ONLY play animations if a custom model is loaded.
-                            // NEVER switch to primitives automatically.
+                    // PEACE SIGN GESTURE FOR ANIMATION CYCLING
+                    if (isPeace(hand)) {
+                        const now = Date.now();
+                        if (now - lastAnimSwitch > 1000) { // 1s cooldown to prevent spamming
                             if (isCustomModelLoaded && animations.length > 0) {
                                 playNextAnimation();
+                                lastAnimSwitch = now;
                             }
-                            palmHoldStart = 0; 
                         }
-                    } else {
-                        palmHoldStart = 0;
                     }
                 }
             } else {
-                palmHoldStart = 0;
-                scaleModeActive = false;
-                rotModeActive = false;
-                setActiveIcon("idle");
+                scaleModeActive = false; rotModeActive = false; setActiveIcon("idle");
                 targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             }
         }
@@ -504,7 +508,6 @@
             holoPivot.rotation.z += (targetRotZ - holoPivot.rotation.z) * smoothFactor;
 
             projectionRing.rotation.z += 0.005;
-            
             renderer.render(scene, camera);
         }
         animate();
@@ -513,10 +516,37 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
+            checkOrientation();
         }
         window.addEventListener('resize', onResize);
 
-        initHands();
+        // --- Device Orientation & Initialize Flow ---
+        function checkOrientation() {
+            const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+            const isPortrait = window.innerHeight > window.innerWidth;
+
+            if (isTouch && isPortrait) {
+                showModal("Please keep your phone in landscape mode to use the Hologram Interface.", [{text: "OK"}]);
+            } else {
+                if (modalOverlay.style.display === 'flex' && modalText.innerText.includes("landscape")) {
+                    modalOverlay.style.display = 'none';
+                }
+            }
+        }
+
+        async function startApp() {
+            if (document.documentElement.requestFullscreen) {
+                try { await document.documentElement.requestFullscreen(); } catch(e) {}
+            }
+            initHands();
+        }
+
+        // Initial Boot Check
+        checkOrientation();
+        showModal("Welcome to Hologram Interface. Ensure your device is in landscape mode and camera permissions are granted.", [
+            { text: "INITIALIZE", color: "cyan", onClick: startApp }
+        ]);
+
     </script>
 </body>
 </html>
