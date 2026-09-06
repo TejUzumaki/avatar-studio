@@ -39,7 +39,6 @@
         .modal-btn { background: transparent; border: 1px solid #ff9100; color: #ff9100; padding: 10px 20px; font-weight: bold; cursor: pointer; margin: 0 5px; transition: 0.2s; }
         .modal-btn:hover { background: rgba(255, 145, 0, 0.2); }
 
-        /* DEBUG MODULE */
         #anim-debug { position: absolute; bottom: 20px; left: 20px; width: 150px; max-height: 250px; overflow-y: auto; background: rgba(15, 15, 25, 0.8); border: 1px solid rgba(0, 255, 255, 0.4); padding: 10px; z-index: 10; display: none; }
         #anim-debug h3 { margin: 0 0 10px 0; font-size: 10px; color: #00ffff; text-align: center; border-bottom: 1px solid rgba(0,255,255,0.2); padding-bottom: 5px; }
         .anim-btn { display: block; width: 100%; box-sizing: border-box; text-align: left; background: transparent; border: 1px solid rgba(0, 255, 255, 0.2); color: #00ffff; padding: 5px 8px; font-size: 9px; margin-bottom: 5px; cursor: pointer; transition: 0.2s; }
@@ -80,7 +79,6 @@
         </div>
     </div>
 
-    <!-- DEBUG MODULE -->
     <div id="anim-debug" class="clip-corner">
         <h3>ANIMATIONS</h3>
         <div id="anim-list"></div>
@@ -142,6 +140,8 @@
 
         // --- IndexedDB Smart Caching ---
         let db;
+        let cachedModelNames = [];
+        let currentCacheIndex = 0;
         const dbRequest = indexedDB.open('HoloModelDB', 1);
         dbRequest.onupgradeneeded = (e) => {
             db = e.target.result;
@@ -155,6 +155,7 @@
                 const tx = db.transaction('models', 'readwrite');
                 tx.objectStore('models').put({ name, blob });
                 tx.onerror = () => showModal("Model is too large to cache permanently in browser storage.", [{text: "OK"}]);
+                tx.oncomplete = () => renderImportList();
             } catch (err) { console.error("Cache error:", err); }
         }
 
@@ -177,9 +178,10 @@
             const tx = db.transaction('models', 'readonly');
             const req = tx.objectStore('models').getAllKeys();
             req.onsuccess = (e) => {
+                cachedModelNames = e.target.result;
                 const list = document.getElementById('import-list');
                 list.innerHTML = '';
-                e.target.result.forEach(name => {
+                cachedModelNames.forEach(name => {
                     const btn = document.createElement('button');
                     btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
                     btn.className = 'import-item clip-corner';
@@ -228,52 +230,105 @@
         holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
-        // --- Holographic Shader ---
-        const holographicVertexShader = `
-            uniform float uTime; uniform float uGlitchIntensity; uniform float uGlitchFrequency;
-            uniform float uRippleFrequency; uniform float uRippleSpeed; uniform float uRippleHeight;
-            varying vec3 vNormal; varying vec3 vWorldPosition; varying vec2 vUv; varying float vRipple;
-            float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
-            void main() {
-                vNormal = normalize(normalMatrix * normal); vUv = uv; vec3 pos = position;
-                float ripple = sin(pos.y * uRippleFrequency - uTime * uRippleSpeed);
-                vRipple = ripple; pos += normal * ripple * uRippleHeight;
+        // --- FIXED HOLOGRAPHIC SHADER (onBeforeCompile) ---
+        // This injects our custom GLSL into Three.js's native system, fixing skinning/animations.
+        const holoMaterial = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
+        holoMaterial.userData.shaderRefs = {};
+
+        holoMaterial.onBeforeCompile = (shader) => {
+            shader.uniforms.uTime = { value: 0 };
+            shader.uniforms.uColor = { value: new THREE.Color('#00ffff') };
+            shader.uniforms.uAlpha = { value: 0.6 }; // Adjusted alpha for basic material
+            shader.uniforms.uFresnelPower = { value: 0.5 };
+            shader.uniforms.uFresnelIntensity = { value: 1.1 };
+            shader.uniforms.uScanlineFrequency = { value: 75 };
+            shader.uniforms.uScanlineSpeed = { value: 15 };
+            shader.uniforms.uGlitchIntensity = { value: 0.08 };
+            shader.uniforms.uGlitchFrequency = { value: 0 };
+            shader.uniforms.uRippleFrequency = { value: 0 };
+            shader.uniforms.uRippleSpeed = { value: 0 };
+            shader.uniforms.uRippleHeight = { value: 0 };
+
+            holoMaterial.userData.shaderRefs.uniforms = shader.uniforms;
+
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <common>',
+                `
+                #include <common>
+                uniform float uTime;
+                uniform float uGlitchIntensity;
+                uniform float uGlitchFrequency;
+                uniform float uRippleFrequency;
+                uniform float uRippleSpeed;
+                uniform float uRippleHeight;
+                varying vec3 vNormal;
+                varying vec3 vWorldPosition;
+                varying float vRipple;
+                `
+            );
+
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <begin_vertex>',
+                `
+                vec3 transformed = position;
+                float ripple = sin(transformed.y * uRippleFrequency - uTime * uRippleSpeed);
+                vRipple = ripple;
+                transformed += normal * ripple * uRippleHeight;
                 float glitchTime = floor(uTime * uGlitchFrequency);
-                float noiseVal = random(vec2(glitchTime, pos.y * 0.1));
+                float noiseVal = fract(sin(dot(vec2(glitchTime, transformed.y * 0.1), vec2(12.9898,78.233))) * 43758.5453123);
                 if (noiseVal > 0.75) {
-                    pos.x += (random(vec2(pos.y, uTime)) - 0.5) * uGlitchIntensity;
-                    pos.z += (random(vec2(pos.x, uTime)) - 0.5) * uGlitchIntensity;
+                    float r1 = fract(sin(dot(vec2(transformed.y, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
+                    float r2 = fract(sin(dot(vec2(transformed.x, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
+                    transformed.x += r1 * uGlitchIntensity;
+                    transformed.z += r2 * uGlitchIntensity;
                 }
-                vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
-                vWorldPosition = worldPosition.xyz;
-                gl_Position = projectionMatrix * viewMatrix * worldPosition;
-            }
-        `;
-        const holographicFragmentShader = `
-            uniform vec3 uColor; uniform float uAlpha; uniform float uFresnelPower;
-            uniform float uFresnelIntensity; uniform float uScanlineFrequency; uniform float uScanlineSpeed; uniform float uTime;
-            varying vec3 vNormal; varying vec3 vWorldPosition; varying vec2 vUv; varying float vRipple;
-            void main() {
-                vec3 normal = normalize(vNormal);
+                `
+            );
+
+            shader.vertexShader = shader.vertexShader.replace(
+                '#include <project_vertex>',
+                `
+                vec4 mvPosition = vec4( transformed, 1.0 );
+                #ifdef USE_INSTANCING
+                    mvPosition = instanceMatrix * mvPosition;
+                #endif
+                mvPosition = modelViewMatrix * mvPosition;
+                gl_Position = projectionMatrix * mvPosition;
+                vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+                vNormal = normalize(normalMatrix * normal);
+                `
+            );
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                '#include <common>',
+                `
+                #include <common>
+                uniform float uTime;
+                uniform vec3 uColor;
+                uniform float uAlpha;
+                uniform float uFresnelPower;
+                uniform float uFresnelIntensity;
+                uniform float uScanlineFrequency;
+                uniform float uScanlineSpeed;
+                varying vec3 vNormal;
+                varying vec3 vWorldPosition;
+                varying float vRipple;
+                `
+            );
+
+            shader.fragmentShader = shader.fragmentShader.replace(
+                'vec4 diffuseColor = vec4( diffuse, opacity );',
+                `
                 vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-                float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), uFresnelPower) * uFresnelIntensity;
+                float fresnel = pow(1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), uFresnelPower) * uFresnelIntensity;
                 float scanline = sin(vWorldPosition.y * uScanlineFrequency - uTime * uScanlineSpeed) * 0.5 + 0.5;
                 scanline = pow(scanline, 1.5);
                 float holoAlpha = (fresnel + scanline * 0.35 + vRipple * 0.1) * uAlpha;
                 vec3 finalColor = uColor + vec3(fresnel * 0.5);
-                gl_FragColor = vec4(finalColor, clamp(holoAlpha, 0.0, 1.0));
-            }
-        `;
-        const holoMaterial = new THREE.ShaderMaterial({
-            vertexShader: holographicVertexShader, fragmentShader: holographicFragmentShader,
-            uniforms: {
-                uTime: { value: 0 }, uColor: { value: new THREE.Color('#00ffff') }, uAlpha: { value: 0.23 },
-                uFresnelPower: { value: 0.5 }, uFresnelIntensity: { value: 1.1 }, uScanlineFrequency: { value: 75 },
-                uScanlineSpeed: { value: 15 }, uGlitchIntensity: { value: 0.08 }, uGlitchFrequency: { value: 0 },
-                uRippleFrequency: { value: 0 }, uRippleSpeed: { value: 0 }, uRippleHeight: { value: 0 }
-            },
-            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
-        });
+                vec4 diffuseColor = vec4( finalColor, clamp(holoAlpha, 0.0, 1.0) );
+                `
+            );
+        };
 
         const geometries = [
             new THREE.BoxGeometry(1.5, 1.5, 1.5), new THREE.ConeGeometry(1, 2, 32), new THREE.SphereGeometry(1.2, 32, 32),
@@ -293,6 +348,7 @@
         let isCustomModelLoaded = false;
         let lastAnimSwitch = 0;
         let lastHandSeenTime = Date.now();
+        let palmHoldStart = 0;
 
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
@@ -334,14 +390,19 @@
                 holoPivot.rotation.set(0,0,0);
 
                 if (mixer) mixer.stopAllAction();
-                animations = gltf.animations;
+                
+                // FILTER T-POSE OUT OF ANIMATIONS
+                animations = gltf.animations.filter(clip => {
+                    const cName = clip.name.toLowerCase();
+                    return !cName.includes('tpose') && !cName.includes('t-pose') && !cName.includes('bind') && !cName.includes('rest');
+                });
+                
                 clearAnimDebug();
 
                 if (animations.length > 0) {
                     mixer = new THREE.AnimationMixer(activeMesh);
                     isCustomModelLoaded = true;
                     
-                    // Populate Debug UI
                     animDebug.style.display = 'block';
                     animations.forEach((clip, index) => {
                         const btn = document.createElement('button');
@@ -351,7 +412,6 @@
                         animList.appendChild(btn);
                     });
                     
-                    // Automatically play the first animation
                     playAnimationByIndex(0);
                 } else {
                     mixer = null;
@@ -377,7 +437,6 @@
             currentAction.setEffectiveWeight(1);
             currentAction.fadeIn(0.5).play();
 
-            // Update active class in debug UI
             document.querySelectorAll('.anim-btn').forEach((btn, i) => {
                 btn.classList.toggle('active', i === currentAnimIndex);
             });
@@ -460,6 +519,7 @@
                 const handsArr = results.multiHandLandmarks;
                 
                 if (handsArr.length === 2) {
+                    palmHoldStart = 0; // Cancel palm hold
                     const h1 = handsArr[0], h2 = handsArr[1];
                     const h1Fist = isFist(h1), h2Fist = isFist(h2);
 
@@ -478,16 +538,12 @@
                                 rotBaselineHandX = handX; rotBaselineHandY = handY; rotBaselineHandAngle = handAngle;
                                 rotBaselineModelX = holoPivot.rotation.x; rotBaselineModelY = holoPivot.rotation.y; rotBaselineModelZ = holoPivot.rotation.z;
                             } else {
-                                // SMART HUMANOID LOCK: If it has animations, ONLY rotate on Y axis
                                 const isHumanoid = isCustomModelLoaded && animations.length > 0;
-
                                 if (isHumanoid) {
-                                    // Inverted X for correct right/left mapping. Y is ignored.
                                     targetRotY = rotBaselineModelY - (handX - rotBaselineHandX) * Math.PI * 3;
-                                    targetRotX = rotBaselineModelX; // Locked
-                                    targetRotZ = rotBaselineModelZ; // Locked
+                                    targetRotX = rotBaselineModelX; 
+                                    targetRotZ = rotBaselineModelZ; 
                                 } else {
-                                    // Primitives keep all 3 axes
                                     targetRotY = rotBaselineModelY - (handX - rotBaselineHandX) * Math.PI * 3;
                                     targetRotX = rotBaselineModelX - (handY - rotBaselineHandY) * Math.PI * 3; 
                                     targetRotZ = rotBaselineModelZ + (handAngle - rotBaselineHandAngle);
@@ -520,12 +576,26 @@
                                 lastAnimSwitch = now;
                             }
                         }
+                    } else if (isPalm(hand)) {
+                        // SMART OPEN PALM: Cycle models if cached, else cycle primitives
+                        if (palmHoldStart === 0) palmHoldStart = Date.now();
+                        if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
+                            if (cachedModelNames.length > 0) {
+                                currentCacheIndex = (currentCacheIndex + 1) % cachedModelNames.length;
+                                loadModelFromDB(cachedModelNames[currentCacheIndex]);
+                            } else {
+                                selectShape((currentShapeIndex + 1) % geometries.length);
+                            }
+                            palmHoldStart = 0; 
+                        }
+                    } else {
+                        palmHoldStart = 0;
                     }
                 }
             } else {
+                palmHoldStart = 0;
                 scaleModeActive = false; rotModeActive = false; setActiveIcon("idle");
                 
-                // 10-Second Idle Timeout
                 if (Date.now() - lastHandSeenTime > 10000) {
                     targetRotX = 0; targetRotY = 0; targetRotZ = 0; 
                     targetScale = 1.0;
@@ -539,7 +609,10 @@
             const delta = clock.getDelta();
             const elapsed = clock.elapsedTime;
             
-            holoMaterial.uniforms.uTime.value = elapsed;
+            // Update shader time safely
+            if (holoMaterial.userData.shaderRefs && holoMaterial.userData.shaderRefs.uniforms) {
+                holoMaterial.userData.shaderRefs.uniforms.uTime.value = elapsed;
+            }
             if (mixer) mixer.update(delta);
             
             const smoothFactor = 0.05;
