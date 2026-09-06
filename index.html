@@ -38,8 +38,6 @@
         #modal-text { color: #00ffff; font-size: 14px; margin-bottom: 25px; line-height: 1.5; }
         .modal-btn { background: transparent; border: 1px solid #ff9100; color: #ff9100; padding: 10px 20px; font-weight: bold; cursor: pointer; margin: 0 5px; transition: 0.2s; }
         .modal-btn:hover { background: rgba(255, 145, 0, 0.2); }
-        .modal-btn.cyan { border-color: #00ffff; color: #00ffff; }
-        .modal-btn.cyan:hover { background: rgba(0, 255, 255, 0.2); }
     </style>
 </head>
 <body>
@@ -127,36 +125,55 @@
             modalOverlay.style.display = 'flex';
         }
 
-        // --- LIGHTWEIGHT LOCAL STORAGE (Name Only) ---
-        let savedModelNames = JSON.parse(localStorage.getItem('holo_model_names') || '[]');
-        let pendingModelName = null;
+        // --- IndexedDB Smart Caching ---
+        let db;
+        const dbRequest = indexedDB.open('HoloModelDB', 1);
+        dbRequest.onupgradeneeded = (e) => {
+            db = e.target.result;
+            if (!db.objectStoreNames.contains('models')) db.createObjectStore('models', { keyPath: 'name' });
+        };
+        dbRequest.onsuccess = (e) => { db = e.target.result; renderImportList(); };
 
-        function addModelName(name) {
-            if (!savedModelNames.includes(name)) {
-                savedModelNames.push(name);
-                localStorage.setItem('holo_model_names', JSON.stringify(savedModelNames));
-            }
-            renderImportList();
+        function saveModelToDB(name, blob) {
+            if (!db) return;
+            try {
+                const tx = db.transaction('models', 'readwrite');
+                tx.objectStore('models').put({ name, blob });
+                tx.onerror = () => showModal("Model is too large to cache permanently in browser storage.", [{text: "OK"}]);
+            } catch (err) { console.error("Cache error:", err); }
+        }
+
+        function loadModelFromDB(name) {
+            if (!db) return;
+            const tx = db.transaction('models', 'readonly');
+            const req = tx.objectStore('models').get(name);
+            req.onsuccess = (e) => {
+                if (e.target.result) {
+                    const url = URL.createObjectURL(e.target.result.blob);
+                    loadCustomGLTF(url, name);
+                } else {
+                    showModal("Model not found in cache. Please re-import it.", [{text: "OK"}]);
+                }
+            };
         }
 
         function renderImportList() {
-            const list = document.getElementById('import-list');
-            list.innerHTML = '';
-            savedModelNames.forEach(name => {
-                const btn = document.createElement('button');
-                btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
-                btn.className = 'import-item clip-corner';
-                btn.onclick = () => {
-                    pendingModelName = name;
-                    showModal(`"${name}" is not in active memory. Load from storage?`, [
-                        { text: "Load", color: "cyan", onClick: () => { document.getElementById('file-input').click(); } },
-                        { text: "Cancel", onClick: () => { pendingModelName = null; } }
-                    ]);
-                };
-                list.appendChild(btn);
-            });
+            if (!db) return;
+            const tx = db.transaction('models', 'readonly');
+            const req = tx.objectStore('models').getAllKeys();
+            req.onsuccess = (e) => {
+                const list = document.getElementById('import-list');
+                list.innerHTML = '';
+                e.target.result.forEach(name => {
+                    const btn = document.createElement('button');
+                    btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
+                    btn.className = 'import-item clip-corner';
+                    // DIRECTLY load from cache without a prompt
+                    btn.onclick = () => loadModelFromDB(name);
+                    list.appendChild(btn);
+                });
+            };
         }
-        renderImportList();
 
         // --- Three.js Iron Man Environment ---
         const scene = new THREE.Scene();
@@ -265,8 +282,7 @@
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
-            pendingModelName = null;
-            addModelName(file.name);
+            saveModelToDB(file.name, file);
             const url = URL.createObjectURL(file);
             loadCustomGLTF(url, file.name);
         });
@@ -298,14 +314,13 @@
 
                 if (mixer) mixer.stopAllAction();
                 animations = gltf.animations;
-                isCustomModelLoaded = true;
-                localStorage.setItem('last_loaded_model', name); // Save session
-
                 if (animations.length > 0) {
                     mixer = new THREE.AnimationMixer(activeMesh);
+                    isCustomModelLoaded = true;
                     playNextAnimation();
                 } else {
                     mixer = null;
+                    isCustomModelLoaded = true;
                 }
 
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
@@ -323,7 +338,7 @@
             action.reset();
             action.setEffectiveTimeScale(1);
             action.setEffectiveWeight(1);
-            action.fadeIn(0.5).play(); 
+            action.fadeIn(0.5).play();
             currentAnimIndex = (currentAnimIndex + 1) % animations.length;
         }
 
@@ -344,7 +359,6 @@
             
             if (mixer) mixer.stopAllAction();
             mixer = null; animations = []; isCustomModelLoaded = false;
-            localStorage.removeItem('last_loaded_model'); // Clear session
             
             targetScale = 1.0; targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             scaleModeActive = false; rotModeActive = false;
@@ -364,19 +378,12 @@
 
         async function startRawCamera() {
             try {
-                if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-                    showModal("No camera detected. Please ensure your device has a camera and is not being used by another app.", [{text: "OK"}]);
-                    return;
-                }
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
                 video.srcObject = stream;
                 await video.play();
                 loader.style.display = 'none';
                 processFrame();
-            } catch (err) { 
-                console.error("Camera error:", err);
-                showModal("Camera access denied or failed. Please check browser permissions.", [{text: "OK"}]);
-            }
+            } catch (err) { console.error("Camera error:", err); }
         }
 
         async function processFrame() {
@@ -445,6 +452,7 @@
                     scaleModeActive = false; rotModeActive = false;
                     const hand = handsArr[0];
                     
+                    // PEACE SIGN GESTURE FOR ANIMATION CYCLING
                     if (isPeace(hand)) {
                         const now = Date.now();
                         if (now - lastAnimSwitch > 1000) { 
@@ -485,51 +493,10 @@
             camera.aspect = window.innerWidth / window.innerHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(window.innerWidth, window.innerHeight);
-            checkOrientation();
         }
         window.addEventListener('resize', onResize);
 
-        // --- Device Orientation & Initialize Flow ---
-        function checkOrientation() {
-            const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
-            const isPortrait = window.innerHeight > window.innerWidth;
-
-            if (isTouch && isPortrait) {
-                showModal("Please keep your phone in landscape mode to use the Hologram Interface.", [{text: "OK"}]);
-            } else {
-                if (modalOverlay.style.display === 'flex' && modalText.innerText.includes("landscape")) {
-                    modalOverlay.style.display = 'none';
-                }
-            }
-        }
-
-        async function startApp() {
-            if (document.documentElement.requestFullscreen) {
-                try { await document.documentElement.requestFullscreen(); } catch(e) {}
-            }
-            initHands();
-        }
-
-        // Initial Boot Check
-        checkOrientation();
-
-        // Check if a model was loaded in the previous session
-        const lastModel = localStorage.getItem('last_loaded_model');
-        if (lastModel) {
-            showModal(`Previously you loaded "${lastModel}". Do you want to load it again?`, [
-                { text: "Load", color: "cyan", onClick: () => { 
-                    pendingModelName = lastModel; 
-                    document.getElementById('file-input').click(); 
-                    startApp(); 
-                }},
-                { text: "Cancel", onClick: startApp }
-            ]);
-        } else {
-            showModal("Welcome to Hologram Interface. Ensure your device is in landscape mode and camera permissions are granted.", [
-                { text: "INITIALIZE", color: "cyan", onClick: startApp }
-            ]);
-        }
-
+        initHands();
     </script>
 </body>
 </html>
