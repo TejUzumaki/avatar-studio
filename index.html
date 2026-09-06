@@ -37,7 +37,7 @@
 <body>
     <div id="loader">
         <div class="spinner"></div>
-        <div id="loader-text" style="color: #ff9100; font-size: 14px;">Initializing Interface...</div>
+        <div id="loader-text" style="color: #ff9100; font-size: 14px;">Initializing 3D Engine...</div>
     </div>
 
     <video id="video" autoplay playsinline muted></video>
@@ -98,41 +98,36 @@
             if (icons[name]) icons[name].classList.add('active');
         }
 
-        // --- IndexedDB Setup ---
-        let db;
-        const dbRequest = indexedDB.open('HoloModelDB', 1);
-        dbRequest.onupgradeneeded = (e) => {
-            db = e.target.result;
-            if (!db.objectStoreNames.contains('models')) db.createObjectStore('models', { keyPath: 'name' });
-        };
-        dbRequest.onsuccess = (e) => { db = e.target.result; renderImportList(); };
+        // --- Lightweight localStorage Name Caching ---
+        let savedModelNames = JSON.parse(localStorage.getItem('holo_model_names') || '[]');
+        
+        function addModelName(name) {
+            if (!savedModelNames.includes(name)) {
+                savedModelNames.push(name);
+                localStorage.setItem('holo_model_names', JSON.stringify(savedModelNames));
+            }
+            renderImportList();
+        }
 
-        function saveModelToDB(name, blob) {
-            const tx = db.transaction('models', 'readwrite');
-            tx.objectStore('models').put({ name, blob });
-            tx.oncomplete = renderImportList;
-        }
-        function loadModelFromDB(name) {
-            const tx = db.transaction('models', 'readonly');
-            const req = tx.objectStore('models').get(name);
-            req.onsuccess = (e) => { const url = URL.createObjectURL(e.target.result.blob); loadCustomGLTF(url, name); };
-        }
         function renderImportList() {
-            if (!db) return;
-            const tx = db.transaction('models', 'readonly');
-            const req = tx.objectStore('models').getAll();
-            req.onsuccess = (e) => {
-                const list = document.getElementById('import-list');
-                list.innerHTML = '';
-                e.target.result.forEach(item => {
-                    const btn = document.createElement('button');
-                    btn.innerText = item.name.length > 15 ? item.name.substring(0, 12) + '...' : item.name;
-                    btn.className = 'import-item clip-corner';
-                    btn.onclick = () => loadModelFromDB(item.name);
-                    list.appendChild(btn);
-                });
-            };
+            const list = document.getElementById('import-list');
+            list.innerHTML = '';
+            savedModelNames.forEach(name => {
+                const btn = document.createElement('button');
+                btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
+                btn.className = 'import-item clip-corner';
+                btn.onclick = () => {
+                    if (confirm(`"${name}" is not in active memory. Load from storage?`)) {
+                        pendingModelName = name; // Used to verify the selected file matches
+                        document.getElementById('file-input').click();
+                    }
+                };
+                list.appendChild(btn);
+            });
         }
+        
+        let pendingModelName = null;
+        renderImportList();
 
         // --- Three.js Iron Man Environment ---
         const scene = new THREE.Scene();
@@ -242,19 +237,23 @@
             clearPivot();
             model.traverse((child) => { if(child.isMesh) child.material = holoMaterial; });
             
+            // Fail-Safe Math to prevent NaN crashes
             const box = new THREE.Box3().setFromObject(model);
             const size = box.getSize(new THREE.Vector3());
             const center = box.getCenter(new THREE.Vector3());
-            const maxDim = Math.max(size.x, size.y, size.z);
+            const maxDim = Math.max(0.1, size.x, size.y, size.z); 
             const baseScale = 2.0 / maxDim; 
             
             model.scale.setScalar(baseScale);
-            model.position.x = -center.x * baseScale;
-            model.position.y = -center.y * baseScale;
-            model.position.z = -center.z * baseScale;
+            
+            if (isFinite(center.x) && isFinite(center.y) && isFinite(center.z)) {
+                model.position.x = -center.x * baseScale;
+                model.position.y = -center.y * baseScale;
+                model.position.z = -center.z * baseScale;
+            }
             
             holoPivot.add(model);
-            holoPivot.userData.baseHeight = size.y * baseScale;
+            holoPivot.userData.baseHeight = Math.max(0.1, size.y * baseScale);
             holoPivot.position.y = holoPivot.userData.baseHeight / 2; 
             
             targetScale = 1.0; targetRotX = 0; targetRotY = 0; targetRotZ = 0;
@@ -284,7 +283,10 @@
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
-            saveModelToDB(file.name, file);
+            
+            // If we prompted to reload from storage, but they selected a different file, just load whatever they selected
+            pendingModelName = null; 
+            addModelName(file.name);
             const url = URL.createObjectURL(file);
             loadCustomGLTF(url, file.name);
         });
@@ -327,35 +329,42 @@
         let rotBaselineModelX = 0, rotBaselineModelY = 0, rotBaselineModelZ = 0;
 
         let hands;
-        function initHands() {
-            try {
-                hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}` });
-                // FIX: Reverted to modelComplexity 0 for fast loading
-                hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
-                hands.onResults(onResults);
-                startRawCamera();
-            } catch (err) {
-                loaderText.innerHTML = `Error: ${err.message}<br>Please refresh.`;
-            }
-        }
-
-        async function startRawCamera() {
+        
+        // --- STRICT PHASED BOOT SEQUENCE ---
+        async function bootApp() {
+            // Phase 1: 3D Engine is already initialized above.
+            
+            // Phase 2: Camera
             loaderText.innerText = "Requesting Camera...";
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
                 video.srcObject = stream;
                 await video.play();
-                loaderText.innerText = "Starting Tracking...";
-                loader.style.display = 'none';
-                processFrame();
             } catch (err) {
                 console.error("Camera error:", err);
                 loaderText.innerHTML = `<strong style="color:#ff4a6b">Camera Access Required</strong><br><br>This app needs your camera to track hand movements.<br>Please check your browser settings, allow camera access, and refresh the page.`;
+                return; // Halt boot sequence
             }
+
+            // Phase 3: MediaPipe
+            loaderText.innerText = "Starting Hand Tracking...";
+            try {
+                hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}` });
+                hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+                hands.onResults(onResults);
+            } catch (err) {
+                loaderText.innerHTML = `Error initializing tracking.<br>Please refresh.`;
+                return;
+            }
+
+            // Phase 4: Start Loop
+            loaderText.innerText = "Ready.";
+            setTimeout(() => loader.style.display = 'none', 300);
+            processFrame();
         }
 
         async function processFrame() {
-            if (video.readyState >= 2) {
+            if (video.readyState >= 2 && hands) {
                 try {
                     await hands.send({ image: video });
                 } catch (e) {
@@ -465,8 +474,8 @@
         }
         window.addEventListener('resize', onResize);
 
-        // Start the app
-        initHands();
+        // Start the strict boot sequence
+        bootApp();
     </script>
 </body>
 </html>
