@@ -7,7 +7,7 @@
     <style>
         body { margin: 0; background: #05050a; overflow: hidden; font-family: 'Segoe UI', sans-serif; color: white; }
         #video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; z-index: -1; }
-        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; transform: scaleX(-1); }
+        #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; transform: scaleX(-1); }
         #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         
         .clip-corner { clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px); }
@@ -32,10 +32,26 @@
         #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050a; z-index: 100; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 20px; }
         .spinner { border: 2px solid rgba(255, 145, 0, 0.2); border-top: 2px solid #ff9100; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* Custom Sci-Fi Prompt Modal */
+        #modal-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 50; display: none; justify-content: center; align-items: center; backdrop-filter: blur(5px); }
+        #modal-box { background: rgba(15, 15, 25, 0.9); border: 1px solid #00ffff; padding: 30px; text-align: center; max-width: 300px; box-shadow: 0 0 30px rgba(0, 255, 255, 0.2); }
+        #modal-text { color: #00ffff; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+        .modal-btn { background: transparent; border: 1px solid #ff9100; color: #ff9100; padding: 10px 20px; font-weight: bold; cursor: pointer; margin: 0 10px; transition: 0.2s; }
+        .modal-btn:hover { background: rgba(255, 145, 0, 0.2); }
     </style>
 </head>
 <body>
     <div id="loader"><div class="spinner"></div></div>
+
+    <!-- Custom Modal -->
+    <div id="modal-overlay">
+        <div id="modal-box" class="clip-corner">
+            <div id="modal-text">Model not in active memory. Load from cache?</div>
+            <button id="modal-yes" class="modal-btn clip-corner">Load</button>
+            <button id="modal-no" class="modal-btn clip-corner">Cancel</button>
+        </div>
+    </div>
 
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay-canvas"></canvas>
@@ -94,40 +110,74 @@
             if (icons[name]) icons[name].classList.add('active');
         }
 
-        // --- LIGHTWEIGHT LOCAL STORAGE (Name Only) ---
-        let savedModelNames = JSON.parse(localStorage.getItem('holo_model_names') || '[]');
+        // --- IndexedDB Smart Caching ---
+        let db;
         let pendingModelName = null;
+        const dbRequest = indexedDB.open('HoloModelDB', 1);
+        dbRequest.onupgradeneeded = (e) => {
+            db = e.target.result;
+            if (!db.objectStoreNames.contains('models')) db.createObjectStore('models', { keyPath: 'name' });
+        };
+        dbRequest.onsuccess = (e) => { db = e.target.result; renderImportList(); };
 
-        function addModelName(name) {
-            if (!savedModelNames.includes(name)) {
-                savedModelNames.push(name);
-                localStorage.setItem('holo_model_names', JSON.stringify(savedModelNames));
+        function saveModelToDB(name, blob) {
+            if (!db) return;
+            try {
+                const tx = db.transaction('models', 'readwrite');
+                tx.objectStore('models').put({ name, blob });
+                tx.onerror = () => alert("Model too large to cache permanently.");
+            } catch (err) {
+                console.error("Cache error:", err);
             }
-            renderImportList();
+        }
+
+        function loadModelFromDB(name) {
+            if (!db) return;
+            const tx = db.transaction('models', 'readonly');
+            const req = tx.objectStore('models').get(name);
+            req.onsuccess = (e) => {
+                if (e.target.result) {
+                    const url = URL.createObjectURL(e.target.result.blob);
+                    loadCustomGLTF(url, name);
+                }
+            };
         }
 
         function renderImportList() {
-            const list = document.getElementById('import-list');
-            list.innerHTML = '';
-            savedModelNames.forEach(name => {
-                const btn = document.createElement('button');
-                btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
-                btn.className = 'import-item clip-corner';
-                btn.onclick = () => {
-                    if (confirm(`"${name}" is not in active memory. Load from storage?`)) {
+            if (!db) return;
+            const tx = db.transaction('models', 'readonly');
+            const req = tx.objectStore('models').getAllKeys();
+            req.onsuccess = (e) => {
+                const list = document.getElementById('import-list');
+                list.innerHTML = '';
+                e.target.result.forEach(name => {
+                    const btn = document.createElement('button');
+                    btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
+                    btn.className = 'import-item clip-corner';
+                    btn.onclick = () => {
                         pendingModelName = name;
-                        document.getElementById('file-input').click();
-                    }
-                };
-                list.appendChild(btn);
-            });
+                        document.getElementById('modal-text').innerText = `"${name}" is not in active memory. Load from cache?`;
+                        document.getElementById('modal-overlay').style.display = 'flex';
+                    };
+                    list.appendChild(btn);
+                });
+            };
         }
-        renderImportList();
+
+        document.getElementById('modal-yes').onclick = () => {
+            document.getElementById('modal-overlay').style.display = 'none';
+            if (pendingModelName) loadModelFromDB(pendingModelName);
+            pendingModelName = null;
+        };
+        document.getElementById('modal-no').onclick = () => {
+            document.getElementById('modal-overlay').style.display = 'none';
+            pendingModelName = null;
+        };
 
         // --- Three.js Iron Man Environment ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x05050a);
-        scene.fog = new THREE.Fog(0x05050a, 6, 25); // Deep void fog
+        scene.fog = new THREE.Fog(0x05050a, 6, 25);
 
         const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 1.5, 4.5);
@@ -137,7 +187,6 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
 
-        // Cinematic Lighting
         scene.add(new THREE.AmbientLight(0x00ffff, 0.2));
         const spotLight = new THREE.SpotLight(0x00ffff, 2.5);
         spotLight.position.set(0, 8, 0);
@@ -148,13 +197,11 @@
         fillLight.position.set(2, 2, 3);
         scene.add(fillLight);
 
-        // Grid Floor
         const grid = new THREE.GridHelper(40, 80, 0x00ffff, 0x002233);
         grid.material.transparent = true;
         grid.material.opacity = 0.4;
         scene.add(grid);
 
-        // Holographic Projection Ring
         const ringGeo = new THREE.RingGeometry(1.2, 1.4, 64);
         const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending });
         const projectionRing = new THREE.Mesh(ringGeo, ringMat);
@@ -162,125 +209,78 @@
         projectionRing.position.y = 0.01;
         scene.add(projectionRing);
 
-        // --- HOLO PIVOT (Fixes T-Pose Swing) ---
         const holoPivot = new THREE.Group();
-        holoPivot.position.y = 1.0; // Hover above the ring
+        holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
-        // --- INTEGRATED CUSTOM HOLOGRAPHIC SHADER ---
+        // --- Holographic Shader ---
         const holographicVertexShader = `
-            uniform float uTime;
-            uniform float uGlitchIntensity;
-            uniform float uGlitchFrequency;
-            uniform float uRippleFrequency;
-            uniform float uRippleSpeed;
-            uniform float uRippleHeight;
-
-            varying vec3 vNormal;
-            varying vec3 vWorldPosition;
-            varying vec2 vUv;
-            varying float vRipple;
-
+            uniform float uTime; uniform float uGlitchIntensity; uniform float uGlitchFrequency;
+            uniform float uRippleFrequency; uniform float uRippleSpeed; uniform float uRippleHeight;
+            varying vec3 vNormal; varying vec3 vWorldPosition; varying vec2 vUv; varying float vRipple;
             float random(vec2 st) { return fract(sin(dot(st.xy, vec2(12.9898,78.233))) * 43758.5453123); }
-
             void main() {
-                vNormal = normalize(normalMatrix * normal);
-                vUv = uv;
-                vec3 pos = position;
-
+                vNormal = normalize(normalMatrix * normal); vUv = uv; vec3 pos = position;
                 float ripple = sin(pos.y * uRippleFrequency - uTime * uRippleSpeed);
-                vRipple = ripple;
-                pos += normal * ripple * uRippleHeight;
-
+                vRipple = ripple; pos += normal * ripple * uRippleHeight;
                 float glitchTime = floor(uTime * uGlitchFrequency);
                 float noiseVal = random(vec2(glitchTime, pos.y * 0.1));
                 if (noiseVal > 0.75) {
                     pos.x += (random(vec2(pos.y, uTime)) - 0.5) * uGlitchIntensity;
                     pos.z += (random(vec2(pos.x, uTime)) - 0.5) * uGlitchIntensity;
                 }
-
                 vec4 worldPosition = modelMatrix * vec4(pos, 1.0);
                 vWorldPosition = worldPosition.xyz;
                 gl_Position = projectionMatrix * viewMatrix * worldPosition;
             }
         `;
-
         const holographicFragmentShader = `
-            uniform vec3 uColor;
-            uniform float uAlpha;
-            uniform float uFresnelPower;
-            uniform float uFresnelIntensity;
-            uniform float uScanlineFrequency;
-            uniform float uScanlineSpeed;
-            uniform float uTime;
-
-            varying vec3 vNormal;
-            varying vec3 vWorldPosition;
-            varying vec2 vUv;
-            varying float vRipple;
-
+            uniform vec3 uColor; uniform float uAlpha; uniform float uFresnelPower;
+            uniform float uFresnelIntensity; uniform float uScanlineFrequency; uniform float uScanlineSpeed; uniform float uTime;
+            varying vec3 vNormal; varying vec3 vWorldPosition; varying vec2 vUv; varying float vRipple;
             void main() {
                 vec3 normal = normalize(vNormal);
                 vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-
                 float fresnel = pow(1.0 - max(dot(viewDir, normal), 0.0), uFresnelPower) * uFresnelIntensity;
                 float scanline = sin(vWorldPosition.y * uScanlineFrequency - uTime * uScanlineSpeed) * 0.5 + 0.5;
                 scanline = pow(scanline, 1.5);
-
                 float holoAlpha = (fresnel + scanline * 0.35 + vRipple * 0.1) * uAlpha;
                 vec3 finalColor = uColor + vec3(fresnel * 0.5);
-
                 gl_FragColor = vec4(finalColor, clamp(holoAlpha, 0.0, 1.0));
             }
         `;
-
         const holoMaterial = new THREE.ShaderMaterial({
-            vertexShader: holographicVertexShader,
-            fragmentShader: holographicFragmentShader,
+            vertexShader: holographicVertexShader, fragmentShader: holographicFragmentShader,
             uniforms: {
-                uTime: { value: 0 },
-                uColor: { value: new THREE.Color('#00ffff') },
-                uAlpha: { value: 0.23 },
-                uFresnelPower: { value: 0.5 },
-                uFresnelIntensity: { value: 1.1 },
-                uScanlineFrequency: { value: 75 },
-                uScanlineSpeed: { value: 15 },
-                uGlitchIntensity: { value: 0.08 },
-                uGlitchFrequency: { value: 0 },
-                uRippleFrequency: { value: 0 },
-                uRippleSpeed: { value: 0 },
-                uRippleHeight: { value: 0 }
+                uTime: { value: 0 }, uColor: { value: new THREE.Color('#00ffff') }, uAlpha: { value: 0.23 },
+                uFresnelPower: { value: 0.5 }, uFresnelIntensity: { value: 1.1 }, uScanlineFrequency: { value: 75 },
+                uScanlineSpeed: { value: 15 }, uGlitchIntensity: { value: 0.08 }, uGlitchFrequency: { value: 0 },
+                uRippleFrequency: { value: 0 }, uRippleSpeed: { value: 0 }, uRippleHeight: { value: 0 }
             },
-            transparent: true,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
-            side: THREE.DoubleSide
+            transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
         });
 
-        // --- Catalog of Geometries ---
         const geometries = [
-            new THREE.BoxGeometry(1.5, 1.5, 1.5),
-            new THREE.ConeGeometry(1, 2, 32),
-            new THREE.SphereGeometry(1.2, 32, 32),
-            new THREE.TorusGeometry(1, 0.4, 16, 100),
-            new THREE.TorusKnotGeometry(0.8, 0.25, 100, 16),
-            new THREE.DodecahedronGeometry(1.2),
-            new THREE.IcosahedronGeometry(1.2),
-            new THREE.CylinderGeometry(0.8, 0.8, 2, 32),
+            new THREE.BoxGeometry(1.5, 1.5, 1.5), new THREE.ConeGeometry(1, 2, 32), new THREE.SphereGeometry(1.2, 32, 32),
+            new THREE.TorusGeometry(1, 0.4, 16, 100), new THREE.TorusKnotGeometry(0.8, 0.25, 100, 16),
+            new THREE.DodecahedronGeometry(1.2), new THREE.IcosahedronGeometry(1.2), new THREE.CylinderGeometry(0.8, 0.8, 2, 32),
             new THREE.TetrahedronGeometry(1.5)
         ];
 
         let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
         holoPivot.add(activeMesh); 
 
-        // --- GLTF Import Logic ---
+        // --- Animation State ---
+        let mixer = null;
+        let animations = [];
+        let currentAnimIndex = 0;
+        let isCustomModelLoaded = false;
+
         const gltfLoader = new GLTFLoader();
-        
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
-            pendingModelName = null;
-            addModelName(file.name);
+            saveModelToDB(file.name, file);
             const url = URL.createObjectURL(file);
             loadCustomGLTF(url, file.name);
         });
@@ -290,9 +290,7 @@
                 while(holoPivot.children.length > 0){ holoPivot.remove(holoPivot.children[0]); }
                 activeMesh = gltf.scene;
                 
-                activeMesh.traverse((child) => {
-                    if(child.isMesh) child.material = holoMaterial;
-                });
+                activeMesh.traverse((child) => { if(child.isMesh) child.material = holoMaterial; });
                 
                 const box = new THREE.Box3().setFromObject(activeMesh);
                 const size = box.getSize(new THREE.Vector3());
@@ -312,6 +310,18 @@
                 holoPivot.scale.set(1, 1, 1);
                 holoPivot.rotation.set(0,0,0);
 
+                // Setup Animations
+                if (mixer) mixer.stopAllAction();
+                animations = gltf.animations;
+                if (animations.length > 0) {
+                    mixer = new THREE.AnimationMixer(activeMesh);
+                    isCustomModelLoaded = true;
+                    playNextAnimation();
+                } else {
+                    mixer = null;
+                    isCustomModelLoaded = true;
+                }
+
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.import-item').forEach(btn => {
                     btn.classList.toggle('active', btn.innerText === name || name.includes(btn.innerText));
@@ -319,34 +329,45 @@
             });
         }
 
-        // --- State & Smoothing ---
+        function playNextAnimation() {
+            if (!mixer || animations.length === 0) return;
+            mixer.stopAllAction();
+            const clip = animations[currentAnimIndex];
+            const action = mixer.clipAction(clip);
+            action.reset();
+            action.setEffectiveTimeScale(1);
+            action.setEffectiveWeight(1);
+            action.fadeIn(0.5).play();
+            currentAnimIndex = (currentAnimIndex + 1) % animations.length;
+        }
+
         let targetScale = 1.0;
         let currentShapeIndex = 0;
         let targetRotX = 0.0, targetRotY = 0.0, targetRotZ = 0.0;
         let palmHoldStart = 0;
 
-        let scaleModeActive = false;
-        let scaleBaselineDist = 0;
-        let scaleBaselineModelScale = 1.0;
-
-        let rotModeActive = false;
-        let rotBaselineHandX = 0, rotBaselineHandY = 0, rotBaselineHandAngle = 0;
+        let scaleModeActive = false, scaleBaselineDist = 0, scaleBaselineModelScale = 1.0;
+        let rotModeActive = false, rotBaselineHandX = 0, rotBaselineHandY = 0, rotBaselineHandAngle = 0;
         let rotBaselineModelX = 0, rotBaselineModelY = 0, rotBaselineModelZ = 0;
 
         window.selectShape = function(index) {
-            if (index === currentShapeIndex) return;
+            if (index === currentShapeIndex && !isCustomModelLoaded) return;
             while(holoPivot.children.length > 0){ holoPivot.remove(holoPivot.children[0]); }
             currentShapeIndex = index;
             activeMesh = new THREE.Mesh(geometries[index], holoMaterial);
             holoPivot.add(activeMesh);
             
+            // Reset animation state
+            if (mixer) mixer.stopAllAction();
+            mixer = null;
+            animations = [];
+            isCustomModelLoaded = false;
+            
             targetScale = 1.0;
             targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             scaleModeActive = false; rotModeActive = false;
             
-            document.querySelectorAll('.catalog-btn').forEach((btn, i) => {
-                btn.classList.toggle('active', i === index);
-            });
+            document.querySelectorAll('.catalog-btn').forEach((btn, i) => btn.classList.toggle('active', i === index));
             document.querySelectorAll('.import-item').forEach(btn => btn.classList.remove('active'));
         }
 
@@ -382,10 +403,11 @@
             overlayCanvas.height = window.innerHeight;
             overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
             
+            // Made dots and lines thicker/brighter
             if (results.multiHandLandmarks) {
                 for (const landmarks of results.multiHandLandmarks) {
-                    drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: 'rgba(255,255,255,0.7)', lineWidth: 1 });
-                    drawLandmarks(overlayCtx, landmarks, { color: 'rgba(255,0,0,0.8)', fillColor: 'rgba(255,0,0,0.8)', lineWidth: 0, radius: 3 });
+                    drawConnectors(overlayCtx, landmarks, HAND_CONNECTIONS, { color: 'rgba(255,255,255,0.9)', lineWidth: 3 });
+                    drawLandmarks(overlayCtx, landmarks, { color: 'rgba(255,0,0,1)', fillColor: 'rgba(255,0,0,1)', lineWidth: 1, radius: 4 });
                 }
             }
 
@@ -446,7 +468,11 @@
                     if (isPalm(hand)) {
                         if (palmHoldStart === 0) palmHoldStart = Date.now();
                         if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
-                            selectShape((currentShapeIndex + 1) % geometries.length);
+                            // ONLY play animations if a custom model is loaded.
+                            // NEVER switch to primitives automatically.
+                            if (isCustomModelLoaded && animations.length > 0) {
+                                playNextAnimation();
+                            }
                             palmHoldStart = 0; 
                         }
                     } else {
@@ -458,15 +484,10 @@
                 scaleModeActive = false;
                 rotModeActive = false;
                 setActiveIcon("idle");
-                
-                // Auto-reset rotation to default when hands are removed, but KEEP scale
-                targetRotX = 0;
-                targetRotY = 0;
-                targetRotZ = 0;
+                targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             }
         }
 
-        // --- Animation Loop ---
         const clock = new THREE.Clock();
         function animate() {
             requestAnimationFrame(animate);
@@ -474,6 +495,7 @@
             const elapsed = clock.elapsedTime;
             
             holoMaterial.uniforms.uTime.value = elapsed;
+            if (mixer) mixer.update(delta);
             
             const smoothFactor = 0.2;
             holoPivot.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
@@ -481,7 +503,6 @@
             holoPivot.rotation.y += (targetRotY - holoPivot.rotation.y) * smoothFactor;
             holoPivot.rotation.z += (targetRotZ - holoPivot.rotation.z) * smoothFactor;
 
-            // Slowly spin the projection ring on the floor
             projectionRing.rotation.z += 0.005;
             
             renderer.render(scene, camera);
