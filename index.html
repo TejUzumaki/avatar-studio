@@ -230,79 +230,69 @@
         holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
-        // --- FIXED HOLOGRAPHIC SHADER (onBeforeCompile) ---
-        // This injects our custom GLSL into Three.js's native system, fixing skinning/animations.
-        const holoMaterial = new THREE.MeshBasicMaterial({ transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide });
-        holoMaterial.userData.shaderRefs = {};
-
-        holoMaterial.onBeforeCompile = (shader) => {
-            shader.uniforms.uTime = { value: 0 };
-            shader.uniforms.uColor = { value: new THREE.Color('#00ffff') };
-            shader.uniforms.uAlpha = { value: 0.6 }; // Adjusted alpha for basic material
-            shader.uniforms.uFresnelPower = { value: 0.5 };
-            shader.uniforms.uFresnelIntensity = { value: 1.1 };
-            shader.uniforms.uScanlineFrequency = { value: 75 };
-            shader.uniforms.uScanlineSpeed = { value: 15 };
-            shader.uniforms.uGlitchIntensity = { value: 0.08 };
-            shader.uniforms.uGlitchFrequency = { value: 0 };
-            shader.uniforms.uRippleFrequency = { value: 0 };
-            shader.uniforms.uRippleSpeed = { value: 0 };
-            shader.uniforms.uRippleHeight = { value: 0 };
-
-            holoMaterial.userData.shaderRefs.uniforms = shader.uniforms;
-
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <common>',
-                `
+        // --- FIXED HOLOGRAPHIC SHADER (Proper Skinning Support) ---
+        const holoMaterial = new THREE.ShaderMaterial({
+            uniforms: {
+                uTime: { value: 0 },
+                uColor: { value: new THREE.Color('#00ffff') },
+                uAlpha: { value: 0.6 },
+                uFresnelPower: { value: 3.0 },
+                uFresnelIntensity: { value: 1.0 },
+                uScanlineFrequency: { value: 50 },
+                uScanlineSpeed: { value: 10 },
+                uGlitchIntensity: { value: 0.08 },
+                uGlitchFrequency: { value: 0 },
+                uRippleFrequency: { value: 0 },
+                uRippleSpeed: { value: 0 },
+                uRippleHeight: { value: 0 }
+            },
+            vertexShader: `
                 #include <common>
+                #include <skinning_pars_vertex>
+
+                varying vec3 vNormal;
+                varying vec3 vWorldPosition;
+                varying float vRipple;
+
                 uniform float uTime;
                 uniform float uGlitchIntensity;
                 uniform float uGlitchFrequency;
                 uniform float uRippleFrequency;
                 uniform float uRippleSpeed;
                 uniform float uRippleHeight;
-                varying vec3 vNormal;
-                varying vec3 vWorldPosition;
-                varying float vRipple;
-                `
-            );
 
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <begin_vertex>',
-                `
-                vec3 transformed = position;
-                float ripple = sin(transformed.y * uRippleFrequency - uTime * uRippleSpeed);
-                vRipple = ripple;
-                transformed += normal * ripple * uRippleHeight;
-                float glitchTime = floor(uTime * uGlitchFrequency);
-                float noiseVal = fract(sin(dot(vec2(glitchTime, transformed.y * 0.1), vec2(12.9898,78.233))) * 43758.5453123);
-                if (noiseVal > 0.75) {
-                    float r1 = fract(sin(dot(vec2(transformed.y, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
-                    float r2 = fract(sin(dot(vec2(transformed.x, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
-                    transformed.x += r1 * uGlitchIntensity;
-                    transformed.z += r2 * uGlitchIntensity;
+                void main() {
+                    #include <skinbase_vertex>
+                    
+                    vec3 transformed = position;
+                    #include <skinning_vertex>
+                    
+                    // Custom displacement
+                    float ripple = sin(transformed.y * uRippleFrequency - uTime * uRippleSpeed);
+                    vRipple = ripple;
+                    transformed += normal * ripple * uRippleHeight;
+
+                    float glitchTime = floor(uTime * uGlitchFrequency);
+                    float noiseVal = fract(sin(dot(vec2(glitchTime, transformed.y * 0.1), vec2(12.9898,78.233))) * 43758.5453123);
+                    if (noiseVal > 0.75) {
+                        float r1 = fract(sin(dot(vec2(transformed.y, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
+                        float r2 = fract(sin(dot(vec2(transformed.x, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
+                        transformed.x += r1 * uGlitchIntensity;
+                        transformed.z += r2 * uGlitchIntensity;
+                    }
+
+                    vec4 mvPosition = vec4( transformed, 1.0 );
+                    #ifdef USE_INSTANCING
+                        mvPosition = instanceMatrix * mvPosition;
+                    #endif
+                    mvPosition = modelViewMatrix * mvPosition;
+                    gl_Position = projectionMatrix * mvPosition;
+                    
+                    vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+                    vNormal = normalize(normalMatrix * normal);
                 }
-                `
-            );
-
-            shader.vertexShader = shader.vertexShader.replace(
-                '#include <project_vertex>',
-                `
-                vec4 mvPosition = vec4( transformed, 1.0 );
-                #ifdef USE_INSTANCING
-                    mvPosition = instanceMatrix * mvPosition;
-                #endif
-                mvPosition = modelViewMatrix * mvPosition;
-                gl_Position = projectionMatrix * mvPosition;
-                vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
-                vNormal = normalize(normalMatrix * normal);
-                `
-            );
-
-            shader.fragmentShader = shader.fragmentShader.replace(
-                '#include <common>',
-                `
-                #include <common>
+            `,
+            fragmentShader: `
                 uniform float uTime;
                 uniform vec3 uColor;
                 uniform float uAlpha;
@@ -310,25 +300,32 @@
                 uniform float uFresnelIntensity;
                 uniform float uScanlineFrequency;
                 uniform float uScanlineSpeed;
+
                 varying vec3 vNormal;
                 varying vec3 vWorldPosition;
                 varying float vRipple;
-                `
-            );
 
-            shader.fragmentShader = shader.fragmentShader.replace(
-                'vec4 diffuseColor = vec4( diffuse, opacity );',
-                `
-                vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-                float fresnel = pow(1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), uFresnelPower) * uFresnelIntensity;
-                float scanline = sin(vWorldPosition.y * uScanlineFrequency - uTime * uScanlineSpeed) * 0.5 + 0.5;
-                scanline = pow(scanline, 1.5);
-                float holoAlpha = (fresnel + scanline * 0.35 + vRipple * 0.1) * uAlpha;
-                vec3 finalColor = uColor + vec3(fresnel * 0.5);
-                vec4 diffuseColor = vec4( finalColor, clamp(holoAlpha, 0.0, 1.0) );
-                `
-            );
-        };
+                void main() {
+                    vec3 viewDir = normalize(cameraPosition - vWorldPosition);
+                    float fresnel = pow(1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), uFresnelPower) * uFresnelIntensity;
+                    
+                    float scanline = sin(vWorldPosition.y * uScanlineFrequency - uTime * uScanlineSpeed) * 0.5 + 0.5;
+                    scanline = pow(scanline, 1.5);
+
+                    // Added baseAlpha to ensure the model is never completely invisible
+                    float baseAlpha = 0.2;
+                    float holoAlpha = baseAlpha + (fresnel + scanline * 0.35 + vRipple * 0.1) * uAlpha;
+                    
+                    vec3 finalColor = uColor + vec3(fresnel * 0.5);
+                    gl_FragColor = vec4(finalColor, clamp(holoAlpha, 0.0, 1.0));
+                }
+            `,
+            transparent: true,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
+            skinning: true // THIS IS REQUIRED FOR RIGGED ANIMATIONS!
+        });
 
         const geometries = [
             new THREE.BoxGeometry(1.5, 1.5, 1.5), new THREE.ConeGeometry(1, 2, 32), new THREE.SphereGeometry(1.2, 32, 32),
@@ -609,10 +606,7 @@
             const delta = clock.getDelta();
             const elapsed = clock.elapsedTime;
             
-            // Update shader time safely
-            if (holoMaterial.userData.shaderRefs && holoMaterial.userData.shaderRefs.uniforms) {
-                holoMaterial.userData.shaderRefs.uniforms.uTime.value = elapsed;
-            }
+            holoMaterial.uniforms.uTime.value = elapsed;
             if (mixer) mixer.update(delta);
             
             const smoothFactor = 0.05;
