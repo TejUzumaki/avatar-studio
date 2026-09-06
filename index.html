@@ -38,6 +38,13 @@
         #modal-text { color: #00ffff; font-size: 14px; margin-bottom: 25px; line-height: 1.5; }
         .modal-btn { background: transparent; border: 1px solid #ff9100; color: #ff9100; padding: 10px 20px; font-weight: bold; cursor: pointer; margin: 0 5px; transition: 0.2s; }
         .modal-btn:hover { background: rgba(255, 145, 0, 0.2); }
+
+        /* DEBUG MODULE */
+        #anim-debug { position: absolute; bottom: 20px; left: 20px; width: 150px; max-height: 250px; overflow-y: auto; background: rgba(15, 15, 25, 0.8); border: 1px solid rgba(0, 255, 255, 0.4); padding: 10px; z-index: 10; display: none; }
+        #anim-debug h3 { margin: 0 0 10px 0; font-size: 10px; color: #00ffff; text-align: center; border-bottom: 1px solid rgba(0,255,255,0.2); padding-bottom: 5px; }
+        .anim-btn { display: block; width: 100%; box-sizing: border-box; text-align: left; background: transparent; border: 1px solid rgba(0, 255, 255, 0.2); color: #00ffff; padding: 5px 8px; font-size: 9px; margin-bottom: 5px; cursor: pointer; transition: 0.2s; }
+        .anim-btn:hover { background: rgba(0, 255, 255, 0.1); }
+        .anim-btn.active { background: rgba(0, 255, 255, 0.3); border-color: #00ffff; }
     </style>
 </head>
 <body>
@@ -73,6 +80,12 @@
         </div>
     </div>
 
+    <!-- DEBUG MODULE -->
+    <div id="anim-debug" class="clip-corner">
+        <h3>ANIMATIONS</h3>
+        <div id="anim-list"></div>
+    </div>
+
     <div id="ui-dock" class="clip-corner">
         <svg id="icon-idle" class="icon active" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v0"></path><path d="M14 10V4a2 2 0 0 0-2-2v0a2 2  0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2v0a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
         <svg id="icon-scale" class="icon" viewBox="0 0 24 24" style="margin-left: 40px;"><path d="M21 3L9 15"></path><path d="M12 3h9v9"></path><path d="M3 21l12-12"></path><path d="M12 21H3v-9"></path></svg>
@@ -100,6 +113,8 @@
         const overlayCtx = overlayCanvas.getContext('2d');
         const threeCanvas = document.getElementById('three-canvas');
         const loader = document.getElementById('loader');
+        const animDebug = document.getElementById('anim-debug');
+        const animList = document.getElementById('anim-list');
 
         const icons = { idle: document.getElementById('icon-idle'), scale: document.getElementById('icon-scale'), rotate: document.getElementById('icon-rotate') };
         function setActiveIcon(name) {
@@ -270,14 +285,13 @@
         let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
         holoPivot.add(activeMesh); 
 
-        // --- Smart Animation State ---
+        // --- Animation State ---
         let mixer = null;
         let animations = [];
         let currentAnimIndex = 0;
         let currentAction = null;
         let isCustomModelLoaded = false;
         let lastAnimSwitch = 0;
-        let autoAnimTimer = null;
         let lastHandSeenTime = Date.now();
 
         const gltfLoader = new GLTFLoader();
@@ -288,6 +302,11 @@
             const url = URL.createObjectURL(file);
             loadCustomGLTF(url, file.name);
         });
+
+        function clearAnimDebug() {
+            animList.innerHTML = '';
+            animDebug.style.display = 'none';
+        }
 
         function loadCustomGLTF(url, name) {
             gltfLoader.load(url, (gltf) => {
@@ -315,17 +334,25 @@
                 holoPivot.rotation.set(0,0,0);
 
                 if (mixer) mixer.stopAllAction();
-                if (autoAnimTimer) clearTimeout(autoAnimTimer);
                 animations = gltf.animations;
-                
+                clearAnimDebug();
+
                 if (animations.length > 0) {
                     mixer = new THREE.AnimationMixer(activeMesh);
                     isCustomModelLoaded = true;
-                    // Auto start animations after 5 seconds
-                    setTimeout(() => {
-                        playNextAnimation();
-                        scheduleNextAutoAnim();
-                    }, 5000);
+                    
+                    // Populate Debug UI
+                    animDebug.style.display = 'block';
+                    animations.forEach((clip, index) => {
+                        const btn = document.createElement('button');
+                        btn.className = 'anim-btn';
+                        btn.innerText = clip.name || `Anim ${index+1}`;
+                        btn.onclick = () => playAnimationByIndex(index);
+                        animList.appendChild(btn);
+                    });
+                    
+                    // Automatically play the first animation
+                    playAnimationByIndex(0);
                 } else {
                     mixer = null;
                     isCustomModelLoaded = true;
@@ -338,36 +365,28 @@
             });
         }
 
-        function playNextAnimation() {
+        function playAnimationByIndex(index) {
             if (!mixer || animations.length === 0) return;
             
             if (currentAction) currentAction.fadeOut(0.5);
 
-            // Random selection if > 5 animations
-            if (animations.length > 5) {
-                let randIdx = Math.floor(Math.random() * animations.length);
-                if (randIdx === currentAnimIndex) randIdx = (randIdx + 1) % animations.length;
-                currentAnimIndex = randIdx;
-            } else {
-                currentAnimIndex = (currentAnimIndex + 1) % animations.length;
-            }
-
+            currentAnimIndex = index;
             currentAction = mixer.clipAction(animations[currentAnimIndex]);
             currentAction.reset();
             currentAction.setEffectiveTimeScale(1);
             currentAction.setEffectiveWeight(1);
             currentAction.fadeIn(0.5).play();
+
+            // Update active class in debug UI
+            document.querySelectorAll('.anim-btn').forEach((btn, i) => {
+                btn.classList.toggle('active', i === currentAnimIndex);
+            });
         }
 
-        function scheduleNextAutoAnim() {
-            if (autoAnimTimer) clearTimeout(autoAnimTimer);
-            if (!mixer || animations.length === 0) return;
-            
-            const duration = currentAction && currentAction.getClip().duration ? currentAction.getClip().duration * 1000 : 5000;
-            autoAnimTimer = setTimeout(() => {
-                playNextAnimation();
-                scheduleNextAutoAnim();
-            }, duration);
+        function playNextAnimation() {
+            if (animations.length === 0) return;
+            let next = (currentAnimIndex + 1) % animations.length;
+            playAnimationByIndex(next);
         }
 
         let targetScale = 1.0;
@@ -386,8 +405,8 @@
             holoPivot.add(activeMesh);
             
             if (mixer) mixer.stopAllAction();
-            if (autoAnimTimer) clearTimeout(autoAnimTimer);
             mixer = null; animations = []; isCustomModelLoaded = false; currentAction = null;
+            clearAnimDebug();
             
             targetScale = 1.0; targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             scaleModeActive = false; rotModeActive = false;
@@ -498,7 +517,6 @@
                         if (now - lastAnimSwitch > 1000) { 
                             if (isCustomModelLoaded && animations.length > 0) {
                                 playNextAnimation();
-                                scheduleNextAutoAnim(); // Reset auto timer
                                 lastAnimSwitch = now;
                             }
                         }
@@ -507,7 +525,7 @@
             } else {
                 scaleModeActive = false; rotModeActive = false; setActiveIcon("idle");
                 
-                // 10-Second Idle Timeout: Smoothly return to default position and scale
+                // 10-Second Idle Timeout
                 if (Date.now() - lastHandSeenTime > 10000) {
                     targetRotX = 0; targetRotY = 0; targetRotZ = 0; 
                     targetScale = 1.0;
