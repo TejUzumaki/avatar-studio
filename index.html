@@ -29,13 +29,16 @@
         .icon { width: 22px; height: 22px; fill: none; stroke: #ff9100; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.3; transition: opacity 0.3s; }
         .icon.active { opacity: 1; filter: drop-shadow(0 0 5px #ff9100); }
 
-        #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050a; z-index: 100; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 20px; }
+        #loader { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: #05050a; z-index: 100; display: flex; justify-content: center; align-items: center; flex-direction: column; gap: 15px; text-align: center; padding: 20px; }
         .spinner { border: 2px solid rgba(255, 145, 0, 0.2); border-top: 2px solid #ff9100; border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite; }
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
-    <div id="loader"><div class="spinner"></div></div>
+    <div id="loader">
+        <div class="spinner"></div>
+        <div id="loader-text" style="color: #ff9100; font-size: 14px;">Initializing Interface...</div>
+    </div>
 
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay-canvas"></canvas>
@@ -87,6 +90,7 @@
         const overlayCtx = overlayCanvas.getContext('2d');
         const threeCanvas = document.getElementById('three-canvas');
         const loader = document.getElementById('loader');
+        const loaderText = document.getElementById('loader-text');
 
         const icons = { idle: document.getElementById('icon-idle'), scale: document.getElementById('icon-scale'), rotate: document.getElementById('icon-rotate') };
         function setActiveIcon(name) {
@@ -133,7 +137,7 @@
         // --- Three.js Iron Man Environment ---
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x05050a);
-        scene.fog = new THREE.Fog(0x05050a, 6, 25); // Deep void fog
+        scene.fog = new THREE.Fog(0x05050a, 6, 25);
 
         const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(0, 1.5, 4.5);
@@ -143,7 +147,6 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(window.devicePixelRatio);
 
-        // Cinematic Lighting
         scene.add(new THREE.AmbientLight(0x00ffff, 0.2));
         const spotLight = new THREE.SpotLight(0x00ffff, 2.5);
         spotLight.position.set(0, 8, 0);
@@ -154,13 +157,11 @@
         fillLight.position.set(2, 2, 3);
         scene.add(fillLight);
 
-        // Grid Floor
         const grid = new THREE.GridHelper(40, 80, 0x00ffff, 0x002233);
         grid.material.transparent = true;
         grid.material.opacity = 0.4;
         scene.add(grid);
 
-        // Holographic Projection Ring
         const ringGeo = new THREE.RingGeometry(1.2, 1.4, 64);
         const ringMat = new THREE.MeshBasicMaterial({ color: 0x00ffff, side: THREE.DoubleSide, transparent: true, opacity: 0.6, blending: THREE.AdditiveBlending });
         const projectionRing = new THREE.Mesh(ringGeo, ringMat);
@@ -215,9 +216,8 @@
             transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide
         });
 
-        // --- Holo Pivot (Fixes T-Pose Swing) ---
         const holoPivot = new THREE.Group();
-        holoPivot.position.y = 1.0; // Default height
+        holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
         const geometries = [
@@ -232,7 +232,6 @@
         let animations = [];
         let currentAnimIndex = 0;
 
-        // --- Model Loading & Centering ---
         function clearPivot() {
             while(holoPivot.children.length > 0){ holoPivot.remove(holoPivot.children[0]); }
             if (mixer) { mixer.stopAllAction(); mixer = null; }
@@ -243,12 +242,11 @@
             clearPivot();
             model.traverse((child) => { if(child.isMesh) child.material = holoMaterial; });
             
-            // Center model in pivot
             const box = new THREE.Box3().setFromObject(model);
             const size = box.getSize(new THREE.Vector3());
             const center = box.getCenter(new THREE.Vector3());
             const maxDim = Math.max(size.x, size.y, size.z);
-            const baseScale = 2.0 / maxDim; // Normalize to 2 units tall
+            const baseScale = 2.0 / maxDim; 
             
             model.scale.setScalar(baseScale);
             model.position.x = -center.x * baseScale;
@@ -257,13 +255,12 @@
             
             holoPivot.add(model);
             holoPivot.userData.baseHeight = size.y * baseScale;
-            holoPivot.position.y = holoPivot.userData.baseHeight / 2; // Feet on floor
+            holoPivot.position.y = holoPivot.userData.baseHeight / 2; 
             
             targetScale = 1.0; targetRotX = 0; targetRotY = 0; targetRotZ = 0;
             holoPivot.scale.set(1, 1, 1); holoPivot.rotation.set(0, 0, 0);
             scaleModeActive = false; rotModeActive = false;
 
-            // Setup Animations
             animations = anims;
             if (animations.length > 0) {
                 mixer = new THREE.AnimationMixer(model);
@@ -281,10 +278,8 @@
             document.querySelectorAll('.import-item').forEach(btn => btn.classList.remove('active'));
         }
 
-        // Initialize with Cube
         selectShape(0);
 
-        // --- GLTF Import Logic ---
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
@@ -295,12 +290,19 @@
         });
 
         function loadCustomGLTF(url, name) {
+            loaderText.innerText = "Importing Model...";
+            loader.style.display = 'flex';
             gltfLoader.load(url, (gltf) => {
                 setupModel(gltf.scene, gltf.animations);
+                loader.style.display = 'none';
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.import-item').forEach(btn => {
                     btn.classList.toggle('active', btn.innerText === name || name.includes(btn.innerText));
                 });
+            }, undefined, (err) => {
+                console.error("GLTF Load Error:", err);
+                loaderText.innerText = "Error loading model.";
+                setTimeout(() => loader.style.display = 'none', 2000);
             });
         }
 
@@ -315,12 +317,10 @@
             action.fadeIn(0.5).play();
             currentAnimIndex = (currentAnimIndex + 1) % animations.length;
             
-            // Auto cycle smoothly
             const duration = clip.duration ? clip.duration * 1000 : 5000;
             setTimeout(() => { if (mixer) playNextAnimation(); }, duration);
         }
 
-        // --- Hand Tracking ---
         let targetScale = 1.0, targetRotX = 0.0, targetRotY = 0.0, targetRotZ = 0.0, palmHoldStart = 0;
         let scaleModeActive = false, scaleBaselineDist = 0, scaleBaselineModelScale = 1.0;
         let rotModeActive = false, rotBaselineHandX = 0, rotBaselineHandY = 0, rotBaselineHandAngle = 0;
@@ -328,21 +328,40 @@
 
         let hands;
         function initHands() {
-            hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}` });
-            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
-            hands.onResults(onResults);
-            startRawCamera();
+            try {
+                hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}` });
+                // FIX: Reverted to modelComplexity 0 for fast loading
+                hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+                hands.onResults(onResults);
+                startRawCamera();
+            } catch (err) {
+                loaderText.innerHTML = `Error: ${err.message}<br>Please refresh.`;
+            }
         }
 
         async function startRawCamera() {
+            loaderText.innerText = "Requesting Camera...";
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 640 }, height: { ideal: 480 } } });
-                video.srcObject = stream; await video.play(); loader.style.display = 'none'; processFrame();
-            } catch (err) { console.error("Camera error:", err); }
+                video.srcObject = stream;
+                await video.play();
+                loaderText.innerText = "Starting Tracking...";
+                loader.style.display = 'none';
+                processFrame();
+            } catch (err) {
+                console.error("Camera error:", err);
+                loaderText.innerHTML = `<strong style="color:#ff4a6b">Camera Access Required</strong><br><br>This app needs your camera to track hand movements.<br>Please check your browser settings, allow camera access, and refresh the page.`;
+            }
         }
 
         async function processFrame() {
-            if (video.readyState >= 2) await hands.send({ image: video });
+            if (video.readyState >= 2) {
+                try {
+                    await hands.send({ image: video });
+                } catch (e) {
+                    console.error("MP Error", e);
+                }
+            }
             requestAnimationFrame(processFrame);
         }
 
@@ -403,8 +422,8 @@
                     if (isPalm(hand)) {
                         if (palmHoldStart === 0) palmHoldStart = Date.now();
                         if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
-                            if (animations.length > 0) playNextAnimation(); // Cycle animation
-                            else selectShape((currentShapeIndex + 1) % geometries.length); // Cycle shape
+                            if (animations.length > 0) playNextAnimation(); 
+                            else selectShape((currentShapeIndex + 1) % geometries.length); 
                             palmHoldStart = 0; 
                         }
                     } else { palmHoldStart = 0; }
@@ -414,7 +433,6 @@
             }
         }
 
-        // --- Animation Loop ---
         const clock = new THREE.Clock();
         function animate() {
             requestAnimationFrame(animate);
@@ -427,7 +445,6 @@
             const smoothFactor = 0.2;
             holoPivot.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
             
-            // Keep feet on floor during scale
             const targetPosY = (holoPivot.userData.baseHeight / 2) * targetScale;
             holoPivot.position.y += (targetPosY - holoPivot.position.y) * smoothFactor;
             
@@ -435,7 +452,7 @@
             holoPivot.rotation.y += (targetRotY - holoPivot.rotation.y) * smoothFactor;
             holoPivot.rotation.z += (targetRotZ - holoPivot.rotation.z) * smoothFactor;
 
-            projectionRing.rotation.z += 0.005; // Slow ring spin
+            projectionRing.rotation.z += 0.005;
             
             renderer.render(scene, camera);
         }
@@ -448,6 +465,7 @@
         }
         window.addEventListener('resize', onResize);
 
+        // Start the app
         initHands();
     </script>
 </body>
