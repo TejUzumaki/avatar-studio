@@ -10,58 +10,22 @@
         #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 1; pointer-events: none; transform: scaleX(-1); }
         #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
         
-        .clip-corner {
-            clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px);
-        }
+        .clip-corner { clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px); }
 
-        #top-bar {
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            display: flex; align-items: flex-start; gap: 15px; z-index: 10; max-width: 95%;
-        }
-
-        #catalog-bar {
-            display: flex; gap: 10px; overflow-x: auto;
-            padding: 10px; background: rgba(15, 15, 25, 0.6);
-            border: 1px solid rgba(255, 145, 0, 0.4); 
-            backdrop-filter: blur(8px); max-height: 40px;
-        }
-        .catalog-btn {
-            background: transparent; border: 1px solid rgba(255, 145, 0, 0.3);
-            color: #ff9100; padding: 8px 12px; font-size: 10px; font-weight: bold;
-            cursor: pointer; transition: 0.2s; text-align: center; flex: 1; white-space: nowrap;
-        }
+        #top-bar { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); display: flex; align-items: flex-start; gap: 15px; z-index: 10; max-width: 95%; }
+        #catalog-bar { display: flex; gap: 10px; overflow-x: auto; padding: 10px; background: rgba(15, 15, 25, 0.6); border: 1px solid rgba(255, 145, 0, 0.4); backdrop-filter: blur(8px); max-height: 40px; }
+        .catalog-btn { background: transparent; border: 1px solid rgba(255, 145, 0, 0.3); color: #ff9100; padding: 8px 12px; font-size: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; text-align: center; flex: 1; white-space: nowrap; }
         .catalog-btn.active { background: rgba(255, 145, 0, 0.2); border-color: #ff9100; box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); }
 
-        /* Import Container */
         #import-container { display: flex; flex-direction: column; gap: 5px; }
-        #import-btn {
-            background: rgba(15, 15, 25, 0.7); border: 1px solid #ff9100; color: #ff9100;
-            padding: 0 15px; font-size: 12px; font-weight: bold; cursor: pointer;
-            backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(255, 145, 0, 0.3);
-            display: flex; align-items: center; justify-content: center; height: 40px;
-        }
+        #import-btn { background: rgba(15, 15, 25, 0.7); border: 1px solid #ff9100; color: #ff9100; padding: 0 15px; font-size: 12px; font-weight: bold; cursor: pointer; backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); display: flex; align-items: center; justify-content: center; height: 40px; }
         #file-input { display: none; }
-
-        /* Import List */
-        #import-list {
-            display: flex; flex-direction: column; gap: 5px; margin-top: 5px;
-            max-height: 150px; overflow-y: auto; width: 120px;
-        }
-        .import-item {
-            background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(0, 255, 255, 0.3);
-            color: #00ffff; padding: 6px 10px; font-size: 10px; cursor: pointer;
-            text-align: left; transition: 0.2s; width: 100%; box-sizing: border-box;
-        }
+        #import-list { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; max-height: 150px; overflow-y: auto; width: 120px; }
+        .import-item { background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(0, 255, 255, 0.3); color: #00ffff; padding: 6px 10px; font-size: 10px; cursor: pointer; text-align: left; transition: 0.2s; width: 100%; box-sizing: border-box; }
         .import-item:hover { background: rgba(0, 255, 255, 0.1); border-color: #00ffff; }
         .import-item.active { background: rgba(0, 255, 255, 0.2); border-color: #00ffff; }
 
-        #ui-dock {
-            position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%);
-            width: 160px; height: 50px; background: rgba(15, 15, 25, 0.7);
-            border: 1px solid rgba(255, 145, 0, 0.4);
-            backdrop-filter: blur(8px); z-index: 10;
-            display: flex; justify-content: center; align-items: center;
-        }
+        #ui-dock { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); width: 160px; height: 50px; background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(255, 145, 0, 0.4); backdrop-filter: blur(8px); z-index: 10; display: flex; justify-content: center; align-items: center; }
         .icon { width: 22px; height: 22px; fill: none; stroke: #ff9100; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.3; transition: opacity 0.3s; }
         .icon.active { opacity: 1; filter: drop-shadow(0 0 5px #ff9100); }
 
@@ -130,51 +94,35 @@
             if (icons[name]) icons[name].classList.add('active');
         }
 
-        // --- IndexedDB Setup for Caching Models ---
-        let db;
-        const dbRequest = indexedDB.open('HoloModelDB', 1);
-        dbRequest.onupgradeneeded = (e) => {
-            db = e.target.result;
-            if (!db.objectStoreNames.contains('models')) {
-                db.createObjectStore('models', { keyPath: 'name' });
+        // --- LIGHTWEIGHT LOCAL STORAGE (Name Only) ---
+        let savedModelNames = JSON.parse(localStorage.getItem('holo_model_names') || '[]');
+        let pendingModelName = null;
+
+        function addModelName(name) {
+            if (!savedModelNames.includes(name)) {
+                savedModelNames.push(name);
+                localStorage.setItem('holo_model_names', JSON.stringify(savedModelNames));
             }
-        };
-        dbRequest.onsuccess = (e) => {
-            db = e.target.result;
             renderImportList();
-        };
-
-        function saveModelToDB(name, blob) {
-            const tx = db.transaction('models', 'readwrite');
-            tx.objectStore('models').put({ name, blob });
-            tx.oncomplete = renderImportList;
-        }
-
-        function loadModelFromDB(name) {
-            const tx = db.transaction('models', 'readonly');
-            const req = tx.objectStore('models').get(name);
-            req.onsuccess = (e) => {
-                const url = URL.createObjectURL(e.target.result.blob);
-                loadCustomGLTF(url, name);
-            };
         }
 
         function renderImportList() {
-            if (!db) return;
-            const tx = db.transaction('models', 'readonly');
-            const req = tx.objectStore('models').getAll();
-            req.onsuccess = (e) => {
-                const list = document.getElementById('import-list');
-                list.innerHTML = '';
-                e.target.result.forEach(item => {
-                    const btn = document.createElement('button');
-                    btn.innerText = item.name.length > 15 ? item.name.substring(0, 12) + '...' : item.name;
-                    btn.className = 'import-item clip-corner';
-                    btn.onclick = () => loadModelFromDB(item.name);
-                    list.appendChild(btn);
-                });
-            };
+            const list = document.getElementById('import-list');
+            list.innerHTML = '';
+            savedModelNames.forEach(name => {
+                const btn = document.createElement('button');
+                btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
+                btn.className = 'import-item clip-corner';
+                btn.onclick = () => {
+                    if (confirm(`"${name}" is not in active memory. Load from storage?`)) {
+                        pendingModelName = name;
+                        document.getElementById('file-input').click();
+                    }
+                };
+                list.appendChild(btn);
+            });
         }
+        renderImportList();
 
         // --- Three.js Setup ---
         const scene = new THREE.Scene();
@@ -302,7 +250,8 @@
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
-            saveModelToDB(file.name, file);
+            pendingModelName = null; // Clear prompt state
+            addModelName(file.name);
             const url = URL.createObjectURL(file);
             loadCustomGLTF(url, file.name);
         });
@@ -319,19 +268,17 @@
                 const box = new THREE.Box3().setFromObject(activeMesh);
                 const size = box.getSize(new THREE.Vector3());
                 const center = box.getCenter(new THREE.Vector3());
-                const maxDim = Math.max(size.x, size.y, size.z);
+                const maxDim = Math.max(0.1, size.x, size.y, size.z);
                 activeMesh.userData.baseScale = 1.5 / maxDim;
                 activeMesh.scale.setScalar(activeMesh.userData.baseScale);
                 activeMesh.position.sub(center.multiplyScalar(activeMesh.userData.baseScale));
                 
                 scene.add(activeMesh);
                 
-                // Reset transforms to prevent snapping on load
                 targetScale = activeMesh.userData.baseScale;
                 targetRotX = 0; targetRotY = 0; targetRotZ = 0;
                 activeMesh.rotation.set(0,0,0);
 
-                // Highlight active imported item
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.import-item').forEach(btn => {
                     btn.classList.toggle('active', btn.innerText === name || name.includes(btn.innerText));
@@ -355,7 +302,6 @@
         let targetRotX = 0.0, targetRotY = 0.0, targetRotZ = 0.0;
         let palmHoldStart = 0;
 
-        // Baseline tracking to prevent snapping
         let scaleModeActive = false;
         let scaleBaselineDist = 0;
         let scaleBaselineModelScale = 1.0;
@@ -386,7 +332,8 @@
         let hands;
         function initHands() {
             hands = new Hands({ locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}` });
-            hands.setOptions({ maxNumHands: 2, modelComplexity: 1, minDetectionConfidence: 0.7, minTrackingConfidence: 0.6 });
+            // FIX: Reverted to modelComplexity 0 for fast loading
+            hands.setOptions({ maxNumHands: 2, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
             hands.onResults(onResults);
             startRawCamera();
         }
@@ -430,9 +377,8 @@
                     const h1Fist = isFist(h1), h2Fist = isFist(h2);
 
                     if (h1Fist || h2Fist) {
-                        // --- ROTATE MODE (DELTA BASED) ---
                         setActiveIcon("rotate");
-                        scaleModeActive = false; // Reset scale baseline when switching modes
+                        scaleModeActive = false; 
                         const rotHand = h1Fist ? h2 : h1;
                         
                         if (!isFist(rotHand)) {
@@ -442,7 +388,6 @@
                             const handAngle = Math.atan2(pinkyMcp.y - wrist.y, pinkyMcp.x - wrist.x);
 
                             if (!rotModeActive) {
-                                // Capture the starting state of hand and model
                                 rotModeActive = true;
                                 rotBaselineHandX = handX;
                                 rotBaselineHandY = handY;
@@ -451,34 +396,28 @@
                                 rotBaselineModelY = activeMesh.rotation.y;
                                 rotBaselineModelZ = activeMesh.rotation.z;
                             } else {
-                                // Apply only the difference (delta) from the baseline
                                 targetRotY = rotBaselineModelY + (handX - rotBaselineHandX) * Math.PI * 3;
-                                targetRotX = rotBaselineModelX - (handY - rotBaselineHandY) * Math.PI * 3; // Inverted Y
+                                targetRotX = rotBaselineModelX - (handY - rotBaselineHandY) * Math.PI * 3; 
                                 targetRotZ = rotBaselineModelZ + (handAngle - rotBaselineHandAngle);
                             }
                         }
                     } else {
-                        // --- SCALE MODE (DELTA BASED) ---
                         setActiveIcon("scale");
-                        rotModeActive = false; // Reset rot baseline when switching modes
+                        rotModeActive = false; 
                         const wrist1 = h1[0], wrist2 = h2[0];
                         const dist = Math.hypot(wrist1.x - wrist2.x, wrist1.y - wrist2.y, wrist1.z - wrist2.z);
                         
                         if (!scaleModeActive) {
-                            // Capture starting hand distance and model scale
                             scaleModeActive = true;
                             scaleBaselineDist = dist;
-                            scaleBaselineModelScale = activeMesh.scale.x; // Current scale
+                            scaleBaselineModelScale = activeMesh.scale.x; 
                         } else {
-                            // Calculate ratio of current dist to baseline dist
                             const scaleRatio = dist / scaleBaselineDist;
                             const baseScale = activeMesh.userData.baseScale || 1.0;
-                            // Target = original baseline model scale * ratio
                             targetScale = Math.max(0.2, Math.min(scaleBaselineModelScale * scaleRatio, baseScale * 4.0));
                         }
                     }
                 } else if (handsArr.length === 1) {
-                    // --- IDLE / SHAPE CHANGE MODE ---
                     setActiveIcon("idle");
                     scaleModeActive = false;
                     rotModeActive = false;
