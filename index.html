@@ -377,7 +377,7 @@
         let lastAnimSwitch = 0;
         let lastHandSeenTime = Date.now();
         let palmHoldStart = 0;
-        let holoEffectEnabled = true;
+        let holoEffectEnabled = localStorage.getItem('holo_enabled') === 'true';
 
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
@@ -395,6 +395,7 @@
                 return;
             }
             holoEffectEnabled = !holoEffectEnabled;
+            localStorage.setItem('holo_enabled', holoEffectEnabled.toString());
             toggleHoloBtn.innerText = holoEffectEnabled ? "HOLO: ON" : "HOLO: OFF";
             
             activeMesh.traverse((child) => {
@@ -492,8 +493,7 @@
                     isCustomModelLoaded = true;
                 }
 
-                holoEffectEnabled = true;
-                toggleHoloBtn.innerText = "HOLO: ON";
+                toggleHoloBtn.innerText = holoEffectEnabled ? "HOLO: ON" : "HOLO: OFF";
 
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.import-item').forEach(btn => {
