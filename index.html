@@ -17,13 +17,16 @@
         .catalog-btn { background: transparent; border: 1px solid rgba(255, 145, 0, 0.3); color: #ff9100; padding: 8px 12px; font-size: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; text-align: center; flex: 1; white-space: nowrap; }
         .catalog-btn.active { background: rgba(255, 145, 0, 0.2); border-color: #ff9100; box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); }
 
-        #import-container { display: flex; flex-direction: column; gap: 5px; }
+        #import-container { display: flex; flex-direction: column; gap: 5px; width: 140px; }
         #import-btn { background: rgba(15, 15, 25, 0.7); border: 1px solid #ff9100; color: #ff9100; padding: 0 15px; font-size: 12px; font-weight: bold; cursor: pointer; backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); display: flex; align-items: center; justify-content: center; height: 40px; }
+        #toggle-holo-btn { background: rgba(15, 15, 25, 0.7); border: 1px solid #00ffff; color: #00ffff; padding: 0 15px; font-size: 10px; font-weight: bold; cursor: pointer; backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(0, 255, 255, 0.3); display: flex; align-items: center; justify-content: center; height: 30px; }
         #file-input { display: none; }
-        #import-list { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; max-height: 150px; overflow-y: auto; width: 120px; }
-        .import-item { background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(0, 255, 255, 0.3); color: #00ffff; padding: 6px 10px; font-size: 10px; cursor: pointer; text-align: left; transition: 0.2s; width: 100%; box-sizing: border-box; }
+        #import-list { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; max-height: 150px; overflow-y: auto; width: 100%; }
+        .import-row { display: flex; gap: 5px; align-items: center; }
+        .import-item { background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(0, 255, 255, 0.3); color: #00ffff; padding: 6px 10px; font-size: 10px; cursor: pointer; text-align: left; transition: 0.2s; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .import-item:hover { background: rgba(0, 255, 255, 0.1); border-color: #00ffff; }
         .import-item.active { background: rgba(0, 255, 255, 0.2); border-color: #00ffff; }
+        .delete-model-btn { background: rgba(255, 0, 0, 0.3); border: 1px solid rgba(255, 0, 0, 0.5); color: #ff4a4a; padding: 6px 8px; font-size: 9px; cursor: pointer; }
 
         #ui-dock { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); width: 160px; height: 50px; background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(255, 145, 0, 0.4); backdrop-filter: blur(8px); z-index: 10; display: flex; justify-content: center; align-items: center; }
         .icon { width: 22px; height: 22px; fill: none; stroke: #ff9100; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.3; transition: opacity 0.3s; }
@@ -75,6 +78,7 @@
         <div id="import-container">
             <input type="file" id="file-input" accept=".glb,.gltf">
             <button id="import-btn" class="clip-corner" onclick="document.getElementById('file-input').click()">IMPORT</button>
+            <button id="toggle-holo-btn" class="clip-corner">HOLO: ON</button>
             <div id="import-list"></div>
         </div>
     </div>
@@ -113,6 +117,7 @@
         const loader = document.getElementById('loader');
         const animDebug = document.getElementById('anim-debug');
         const animList = document.getElementById('anim-list');
+        const toggleHoloBtn = document.getElementById('toggle-holo-btn');
 
         const icons = { idle: document.getElementById('icon-idle'), scale: document.getElementById('icon-scale'), rotate: document.getElementById('icon-rotate') };
         function setActiveIcon(name) {
@@ -142,6 +147,8 @@
         let db;
         let cachedModelNames = [];
         let currentCacheIndex = 0;
+        let activeObjectURL = null; // Audit #5: Track Object URLs
+
         const dbRequest = indexedDB.open('HoloModelDB', 1);
         dbRequest.onupgradeneeded = (e) => {
             db = e.target.result;
@@ -157,6 +164,16 @@
                 tx.onerror = () => showModal("Model is too large to cache permanently in browser storage.", [{text: "OK"}]);
                 tx.oncomplete = () => renderImportList();
             } catch (err) { console.error("Cache error:", err); }
+        }
+
+        function deleteModelFromDB(name) {
+            if (!db) return;
+            const tx = db.transaction('models', 'readwrite');
+            tx.objectStore('models').delete(name);
+            tx.oncomplete = () => {
+                renderImportList();
+                showModal(`Model "${name}" deleted from cache.`, [{text: "OK"}]);
+            };
         }
 
         function loadModelFromDB(name) {
@@ -182,11 +199,22 @@
                 const list = document.getElementById('import-list');
                 list.innerHTML = '';
                 cachedModelNames.forEach(name => {
+                    const row = document.createElement('div');
+                    row.className = 'import-row';
+                    
                     const btn = document.createElement('button');
                     btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
                     btn.className = 'import-item clip-corner';
                     btn.onclick = () => loadModelFromDB(name);
-                    list.appendChild(btn);
+                    
+                    const delBtn = document.createElement('button');
+                    delBtn.innerText = 'X';
+                    delBtn.className = 'delete-model-btn clip-corner';
+                    delBtn.onclick = () => deleteModelFromDB(name);
+                    
+                    row.appendChild(btn);
+                    row.appendChild(delBtn);
+                    list.appendChild(row);
                 });
             };
         }
@@ -204,13 +232,13 @@
         renderer.setSize(window.innerWidth, window.innerHeight);
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
 
-        scene.add(new THREE.AmbientLight(0x00ffff, 0.2));
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6)); 
         const spotLight = new THREE.SpotLight(0x00ffff, 2.5);
         spotLight.position.set(0, 8, 0);
         spotLight.angle = Math.PI / 4;
         spotLight.penumbra = 0.5;
         scene.add(spotLight);
-        const fillLight = new THREE.DirectionalLight(0xffffff, 0.4);
+        const fillLight = new THREE.DirectionalLight(0xffffff, 1.5); 
         fillLight.position.set(2, 2, 3);
         scene.add(fillLight);
 
@@ -230,7 +258,7 @@
         holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
-        // --- FIXED HOLOGRAPHIC SHADER (Proper Skinning Support) ---
+        // --- FIXED HOLOGRAPHIC SHADER (Audit #7: Skinning Normals Fixed) ---
         const holoMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 uTime: { value: 0 },
@@ -266,11 +294,14 @@
                     
                     vec3 transformed = position;
                     #include <skinning_vertex>
+
+                    vec3 objectNormal = normal;
+                    #include <skinnormal_vertex> 
+                    vNormal = normalize(normalMatrix * transformedNormal);
                     
-                    // Custom displacement
                     float ripple = sin(transformed.y * uRippleFrequency - uTime * uRippleSpeed);
                     vRipple = ripple;
-                    transformed += normal * ripple * uRippleHeight;
+                    transformed += normalize(vNormal) * ripple * uRippleHeight;
 
                     float glitchTime = floor(uTime * uGlitchFrequency);
                     float noiseVal = fract(sin(dot(vec2(glitchTime, transformed.y * 0.1), vec2(12.9898,78.233))) * 43758.5453123);
@@ -289,7 +320,6 @@
                     gl_Position = projectionMatrix * mvPosition;
                     
                     vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
-                    vNormal = normalize(normalMatrix * normal);
                 }
             `,
             fragmentShader: `
@@ -312,7 +342,6 @@
                     float scanline = sin(vWorldPosition.y * uScanlineFrequency - uTime * uScanlineSpeed) * 0.5 + 0.5;
                     scanline = pow(scanline, 1.5);
 
-                    // Added baseAlpha to ensure the model is never completely invisible
                     float baseAlpha = 0.2;
                     float holoAlpha = baseAlpha + (fresnel + scanline * 0.35 + vRipple * 0.1) * uAlpha;
                     
@@ -324,7 +353,7 @@
             depthWrite: false,
             blending: THREE.AdditiveBlending,
             side: THREE.DoubleSide,
-            skinning: true // THIS IS REQUIRED FOR RIGGED ANIMATIONS!
+            skinning: true 
         });
 
         const geometries = [
@@ -346,6 +375,7 @@
         let lastAnimSwitch = 0;
         let lastHandSeenTime = Date.now();
         let palmHoldStart = 0;
+        let holoEffectEnabled = true;
 
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
@@ -356,17 +386,66 @@
             loadCustomGLTF(url, file.name);
         });
 
+        // Toggle Holo Effect Logic
+        toggleHoloBtn.onclick = () => {
+            if (!isCustomModelLoaded) {
+                showModal("Hologram toggle only applies to imported models.", [{text: "OK"}]);
+                return;
+            }
+            holoEffectEnabled = !holoEffectEnabled;
+            toggleHoloBtn.innerText = holoEffectEnabled ? "HOLO: ON" : "HOLO: OFF";
+            
+            activeMesh.traverse((child) => {
+                if(child.isMesh && child.userData.originalMaterial) {
+                    child.material = holoEffectEnabled ? holoMaterial : child.userData.originalMaterial;
+                }
+            });
+        };
+
         function clearAnimDebug() {
             animList.innerHTML = '';
             animDebug.style.display = 'none';
         }
 
+        // Audit #6: Proper GPU Disposal
+        function disposeHierarchy(node) {
+            if (!node) return;
+            node.traverse(child => {
+                if (child.isMesh) {
+                    if (child.geometry) child.geometry.dispose();
+                    // Dispose original materials, but NEVER dispose the shared holoMaterial
+                    if (child.userData.originalMaterial) {
+                        if (Array.isArray(child.userData.originalMaterial)) {
+                            child.userData.originalMaterial.forEach(m => m.dispose());
+                        } else {
+                            child.userData.originalMaterial.dispose();
+                        }
+                    }
+                }
+            });
+        }
+
         function loadCustomGLTF(url, name) {
+            // Audit #5: Revoke old Object URL
+            if (activeObjectURL) URL.revokeObjectURL(activeObjectURL);
+            activeObjectURL = url;
+
             gltfLoader.load(url, (gltf) => {
+                // Dispose previous custom model to free memory
+                if (isCustomModelLoaded) {
+                    disposeHierarchy(activeMesh);
+                }
+                
                 while(holoPivot.children.length > 0){ holoPivot.remove(holoPivot.children[0]); }
                 activeMesh = gltf.scene;
                 
-                activeMesh.traverse((child) => { if(child.isMesh) child.material = holoMaterial; });
+                // Save original materials, then apply holo
+                activeMesh.traverse((child) => { 
+                    if(child.isMesh) {
+                        child.userData.originalMaterial = child.material;
+                        child.material = holoMaterial; 
+                    }
+                });
                 
                 const box = new THREE.Box3().setFromObject(activeMesh);
                 const size = box.getSize(new THREE.Vector3());
@@ -388,7 +467,6 @@
 
                 if (mixer) mixer.stopAllAction();
                 
-                // FILTER T-POSE OUT OF ANIMATIONS
                 animations = gltf.animations.filter(clip => {
                     const cName = clip.name.toLowerCase();
                     return !cName.includes('tpose') && !cName.includes('t-pose') && !cName.includes('bind') && !cName.includes('rest');
@@ -415,10 +493,17 @@
                     isCustomModelLoaded = true;
                 }
 
+                holoEffectEnabled = true;
+                toggleHoloBtn.innerText = "HOLO: ON";
+
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.import-item').forEach(btn => {
                     btn.classList.toggle('active', btn.innerText === name || name.includes(btn.innerText));
                 });
+            }, undefined, (err) => {
+                // Audit #26: GLTF Error Handling
+                console.error("GLTF Load Error:", err);
+                showModal("Failed to load model. The file may be corrupted or invalid.", [{text: "OK"}]);
             });
         }
 
@@ -455,6 +540,12 @@
 
         window.selectShape = function(index) {
             if (index === currentShapeIndex && !isCustomModelLoaded) return;
+            
+            // Dispose previous custom model if switching to primitive
+            if (isCustomModelLoaded) {
+                disposeHierarchy(activeMesh);
+            }
+            
             while(holoPivot.children.length > 0){ holoPivot.remove(holoPivot.children[0]); }
             currentShapeIndex = index;
             activeMesh = new THREE.Mesh(geometries[index], holoMaterial);
@@ -487,7 +578,10 @@
                 await video.play();
                 loader.style.display = 'none';
                 processFrame();
-            } catch (err) { console.error("Camera error:", err); }
+            } catch (err) { 
+                console.error("Camera error:", err);
+                showModal("Camera access denied or failed. Please check browser permissions.", [{text: "OK"}]);
+            }
         }
 
         async function processFrame() {
@@ -516,7 +610,7 @@
                 const handsArr = results.multiHandLandmarks;
                 
                 if (handsArr.length === 2) {
-                    palmHoldStart = 0; // Cancel palm hold
+                    palmHoldStart = 0;
                     const h1 = handsArr[0], h2 = handsArr[1];
                     const h1Fist = isFist(h1), h2Fist = isFist(h2);
 
@@ -574,7 +668,6 @@
                             }
                         }
                     } else if (isPalm(hand)) {
-                        // SMART OPEN PALM: Cycle models if cached, else cycle primitives
                         if (palmHoldStart === 0) palmHoldStart = Date.now();
                         if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
                             if (cachedModelNames.length > 0) {
@@ -601,6 +694,8 @@
         }
 
         const clock = new THREE.Clock();
+        const targetScaleVector = new THREE.Vector3(); // Audit #23: Reuse Vector
+        
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
@@ -610,7 +705,8 @@
             if (mixer) mixer.update(delta);
             
             const smoothFactor = 0.05;
-            holoPivot.scale.lerp(new THREE.Vector3(targetScale, targetScale, targetScale), smoothFactor);
+            targetScaleVector.set(targetScale, targetScale, targetScale);
+            holoPivot.scale.lerp(targetScaleVector, smoothFactor);
             holoPivot.rotation.x += (targetRotX - holoPivot.rotation.x) * smoothFactor;
             holoPivot.rotation.y += (targetRotY - holoPivot.rotation.y) * smoothFactor;
             holoPivot.rotation.z += (targetRotZ - holoPivot.rotation.z) * smoothFactor;
