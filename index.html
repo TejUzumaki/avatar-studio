@@ -48,8 +48,8 @@
         .anim-btn:hover { background: rgba(0, 255, 255, 0.1); }
         .anim-btn.active { background: rgba(0, 255, 255, 0.3); border-color: #00ffff; }
 
-        /* Phase 2: Contextual HUD */
-        #gesture-hud { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 5px 15px; border-radius: 15px; font-size: 12px; color: #00ffff; z-index: 10; pointer-events: none; border: 1px solid rgba(0, 255, 255, 0.3); backdrop-filter: blur(5px); display: none; }
+        /* Phase 2: Contextual HUD (Angular UI) */
+        #gesture-hud { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: rgba(15, 15, 25, 0.7); padding: 8px 20px; font-size: 12px; color: #00ffff; z-index: 10; pointer-events: none; border: 1px solid rgba(0, 255, 255, 0.4); backdrop-filter: blur(8px); display: none; }
     </style>
 </head>
 <body>
@@ -66,7 +66,7 @@
     <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
 
-    <div id="gesture-hud">WAITING FOR HANDS</div>
+    <div id="gesture-hud" class="clip-corner">WAITING FOR HANDS</div>
 
     <div id="top-bar">
         <div id="catalog-bar" class="clip-corner">
@@ -382,7 +382,6 @@
         let lastHandSeenTime = Date.now();
         let palmHoldStart = 0;
         
-        // FIX: Load state from localStorage and set button text immediately
         let holoEffectEnabled = localStorage.getItem('holo_enabled') === 'true';
         toggleHoloBtn.innerText = holoEffectEnabled ? "HOLO: ON" : "HOLO: OFF";
 
@@ -395,7 +394,6 @@
             loadCustomGLTF(url, file.name);
         });
 
-        // Toggle Holo Effect Logic (with needsUpdate fix for single-click swap)
         toggleHoloBtn.onclick = () => {
             if (!isCustomModelLoaded) {
                 showModal("Hologram toggle only applies to imported models.", [{text: "OK"}]);
@@ -408,7 +406,7 @@
             activeMesh.traverse((child) => {
                 if(child.isMesh && child.userData.originalMaterial) {
                     child.material = holoEffectEnabled ? holoMaterial : child.userData.originalMaterial;
-                    child.material.needsUpdate = true; // Forces Three.js to recompile shader instantly
+                    child.material.needsUpdate = true; 
                 }
             });
         };
@@ -464,8 +462,7 @@
                 activeMesh.position.y = -center.y * baseScale;
                 activeMesh.position.z = -center.z * baseScale;
                 
-                // FIX: Force model to face the player
-                activeMesh.rotation.y = Math.PI;
+                // FIX: Reverted forced rotation. Models will load in their default, correct orientation.
                 
                 holoPivot.add(activeMesh);
                 
@@ -635,7 +632,6 @@
                                 rotBaselineHandX = handX; rotBaselineHandY = handY; rotBaselineHandAngle = handAngle;
                                 rotBaselineModelX = holoPivot.rotation.x; rotBaselineModelY = holoPivot.rotation.y; rotBaselineModelZ = holoPivot.rotation.z;
                             } else {
-                                // FIX: Apply Y-axis only restriction to ALL imported models (handles T-Poses safely)
                                 if (isCustomModelLoaded) {
                                     targetRotY = rotBaselineModelY - (handX - rotBaselineHandX) * Math.PI * 3;
                                     targetRotX = rotBaselineModelX; 
@@ -704,7 +700,7 @@
             }
         }
 
-        // Phase 2: Manual Touch Fallback (Drag to rotate)
+        // Phase 2: Manual Touch Fallback 
         let isDragging = false;
         let previousTouchX = 0;
         let previousTouchY = 0;
