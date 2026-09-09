@@ -147,7 +147,7 @@
         let db;
         let cachedModelNames = [];
         let currentCacheIndex = 0;
-        let activeObjectURL = null; // Audit #5: Track Object URLs
+        let activeObjectURL = null; 
 
         const dbRequest = indexedDB.open('HoloModelDB', 1);
         dbRequest.onupgradeneeded = (e) => {
@@ -258,7 +258,7 @@
         holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
-        // --- FIXED HOLOGRAPHIC SHADER (Audit #7: Skinning Normals Fixed) ---
+        // --- FIXED HOLOGRAPHIC SHADER (Audit #7: Skinning Normals Fixed Correctly) ---
         const holoMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 uTime: { value: 0 },
@@ -295,13 +295,15 @@
                     vec3 transformed = position;
                     #include <skinning_vertex>
 
-                    vec3 objectNormal = normal;
-                    #include <skinnormal_vertex> 
-                    vNormal = normalize(normalMatrix * transformedNormal);
+                    // Properly define and transform normals for skinning
+                    vec3 transformedNormal = vec3( normal );
+                    #include <skinnormal_vertex>
+                    vNormal = normalize( normalMatrix * transformedNormal );
                     
                     float ripple = sin(transformed.y * uRippleFrequency - uTime * uRippleSpeed);
                     vRipple = ripple;
-                    transformed += normalize(vNormal) * ripple * uRippleHeight;
+                    // Use object space normal for displacement
+                    transformed += transformedNormal * ripple * uRippleHeight;
 
                     float glitchTime = floor(uTime * uGlitchFrequency);
                     float noiseVal = fract(sin(dot(vec2(glitchTime, transformed.y * 0.1), vec2(12.9898,78.233))) * 43758.5453123);
@@ -426,12 +428,10 @@
         }
 
         function loadCustomGLTF(url, name) {
-            // Audit #5: Revoke old Object URL
             if (activeObjectURL) URL.revokeObjectURL(activeObjectURL);
             activeObjectURL = url;
 
             gltfLoader.load(url, (gltf) => {
-                // Dispose previous custom model to free memory
                 if (isCustomModelLoaded) {
                     disposeHierarchy(activeMesh);
                 }
@@ -439,7 +439,6 @@
                 while(holoPivot.children.length > 0){ holoPivot.remove(holoPivot.children[0]); }
                 activeMesh = gltf.scene;
                 
-                // Save original materials, then apply holo
                 activeMesh.traverse((child) => { 
                     if(child.isMesh) {
                         child.userData.originalMaterial = child.material;
@@ -501,7 +500,6 @@
                     btn.classList.toggle('active', btn.innerText === name || name.includes(btn.innerText));
                 });
             }, undefined, (err) => {
-                // Audit #26: GLTF Error Handling
                 console.error("GLTF Load Error:", err);
                 showModal("Failed to load model. The file may be corrupted or invalid.", [{text: "OK"}]);
             });
@@ -541,7 +539,6 @@
         window.selectShape = function(index) {
             if (index === currentShapeIndex && !isCustomModelLoaded) return;
             
-            // Dispose previous custom model if switching to primitive
             if (isCustomModelLoaded) {
                 disposeHierarchy(activeMesh);
             }
@@ -694,7 +691,7 @@
         }
 
         const clock = new THREE.Clock();
-        const targetScaleVector = new THREE.Vector3(); // Audit #23: Reuse Vector
+        const targetScaleVector = new THREE.Vector3(); 
         
         function animate() {
             requestAnimationFrame(animate);
