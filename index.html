@@ -17,16 +17,17 @@
         .catalog-btn { background: transparent; border: 1px solid rgba(255, 145, 0, 0.3); color: #ff9100; padding: 8px 12px; font-size: 10px; font-weight: bold; cursor: pointer; transition: 0.2s; text-align: center; flex: 1; white-space: nowrap; }
         .catalog-btn.active { background: rgba(255, 145, 0, 0.2); border-color: #ff9100; box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); }
 
-        #import-container { display: flex; flex-direction: column; gap: 5px; width: 140px; }
+        #import-container { display: flex; flex-direction: column; gap: 5px; width: 160px; }
         #import-btn { background: rgba(15, 15, 25, 0.7); border: 1px solid #ff9100; color: #ff9100; padding: 0 15px; font-size: 12px; font-weight: bold; cursor: pointer; backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(255, 145, 0, 0.3); display: flex; align-items: center; justify-content: center; height: 40px; }
         #toggle-holo-btn { background: rgba(15, 15, 25, 0.7); border: 1px solid #00ffff; color: #00ffff; padding: 0 15px; font-size: 10px; font-weight: bold; cursor: pointer; backdrop-filter: blur(8px); box-shadow: 0 0 10px rgba(0, 255, 255, 0.3); display: flex; align-items: center; justify-content: center; height: 30px; }
         #file-input { display: none; }
         #import-list { display: flex; flex-direction: column; gap: 5px; margin-top: 5px; max-height: 150px; overflow-y: auto; width: 100%; }
         .import-row { display: flex; gap: 5px; align-items: center; }
-        .import-item { background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(0, 255, 255, 0.3); color: #00ffff; padding: 6px 10px; font-size: 10px; cursor: pointer; text-align: left; transition: 0.2s; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .import-item { background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(0, 255, 255, 0.3); color: #00ffff; padding: 6px 10px; font-size: 10px; cursor: pointer; text-align: left; transition: 0.2s; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex-direction: column; gap: 2px; display: flex; }
         .import-item:hover { background: rgba(0, 255, 255, 0.1); border-color: #00ffff; }
         .import-item.active { background: rgba(0, 255, 255, 0.2); border-color: #00ffff; }
-        .delete-model-btn { background: rgba(255, 0, 0, 0.3); border: 1px solid rgba(255, 0, 0, 0.5); color: #ff4a4a; padding: 6px 8px; font-size: 9px; cursor: pointer; }
+        .model-meta { font-size: 8px; color: #888; }
+        .delete-model-btn { background: rgba(255, 0, 0, 0.3); border: 1px solid rgba(255, 0, 0, 0.5); color: #ff4a4a; padding: 6px 8px; font-size: 9px; cursor: pointer; height: 100%; }
 
         #ui-dock { position: absolute; bottom: 40px; left: 50%; transform: translateX(-50%); width: 160px; height: 50px; background: rgba(15, 15, 25, 0.7); border: 1px solid rgba(255, 145, 0, 0.4); backdrop-filter: blur(8px); z-index: 10; display: flex; justify-content: center; align-items: center; }
         .icon { width: 22px; height: 22px; fill: none; stroke: #ff9100; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; opacity: 0.3; transition: opacity 0.3s; }
@@ -48,7 +49,6 @@
         .anim-btn:hover { background: rgba(0, 255, 255, 0.1); }
         .anim-btn.active { background: rgba(0, 255, 255, 0.3); border-color: #00ffff; }
 
-        /* Phase 2: Contextual HUD (Angular UI) */
         #gesture-hud { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: rgba(15, 15, 25, 0.7); padding: 8px 20px; font-size: 12px; color: #00ffff; z-index: 10; pointer-events: none; border: 1px solid rgba(0, 255, 255, 0.4); backdrop-filter: blur(8px); display: none; }
     </style>
 </head>
@@ -151,7 +151,7 @@
 
         // --- IndexedDB Smart Caching ---
         let db;
-        let cachedModelNames = [];
+        let cachedModelData = [];
         let currentCacheIndex = 0;
         let activeObjectURL = null; 
 
@@ -162,11 +162,11 @@
         };
         dbRequest.onsuccess = (e) => { db = e.target.result; renderImportList(); };
 
-        function saveModelToDB(name, blob) {
+        function saveModelToDB(name, blob, meta) {
             if (!db) return;
             try {
                 const tx = db.transaction('models', 'readwrite');
-                tx.objectStore('models').put({ name, blob });
+                tx.objectStore('models').put({ name, blob, meta });
                 tx.onerror = () => showModal("Model is too large to cache permanently in browser storage.", [{text: "OK"}]);
                 tx.oncomplete = () => renderImportList();
             } catch (err) { console.error("Cache error:", err); }
@@ -199,24 +199,33 @@
         function renderImportList() {
             if (!db) return;
             const tx = db.transaction('models', 'readonly');
-            const req = tx.objectStore('models').getAllKeys();
+            const req = tx.objectStore('models').getAll();
             req.onsuccess = (e) => {
-                cachedModelNames = e.target.result;
+                cachedModelData = e.target.result;
                 const list = document.getElementById('import-list');
                 list.innerHTML = '';
-                cachedModelNames.forEach(name => {
+                cachedModelData.forEach(item => {
                     const row = document.createElement('div');
                     row.className = 'import-row';
                     
                     const btn = document.createElement('button');
-                    btn.innerText = name.length > 15 ? name.substring(0, 12) + '...' : name;
                     btn.className = 'import-item clip-corner';
-                    btn.onclick = () => loadModelFromDB(name);
+                    
+                    const nameDiv = document.createElement('div');
+                    nameDiv.innerText = item.name.length > 15 ? item.name.substring(0, 12) + '...' : item.name;
+                    
+                    const metaDiv = document.createElement('div');
+                    metaDiv.className = 'model-meta';
+                    metaDiv.innerText = item.meta ? `${item.meta.size} | ${item.meta.tris} Tris | ${item.meta.anims} Anims` : '';
+                    
+                    btn.appendChild(nameDiv);
+                    btn.appendChild(metaDiv);
+                    btn.onclick = () => loadModelFromDB(item.name);
                     
                     const delBtn = document.createElement('button');
                     delBtn.innerText = 'X';
                     delBtn.className = 'delete-model-btn clip-corner';
-                    delBtn.onclick = () => deleteModelFromDB(name);
+                    delBtn.onclick = () => deleteModelFromDB(item.name);
                     
                     row.appendChild(btn);
                     row.appendChild(delBtn);
@@ -264,101 +273,51 @@
         holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
-        // --- FIXED HOLOGRAPHIC SHADER ---
+        // --- FULLY STABLE HOLOGRAPHIC SHADER ---
         const holoMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 uTime: { value: 0 },
-                uColor: { value: new THREE.Color('#00ffff') },
-                uAlpha: { value: 0.6 },
-                uFresnelPower: { value: 3.0 },
-                uFresnelIntensity: { value: 1.0 },
-                uScanlineFrequency: { value: 50 },
-                uScanlineSpeed: { value: 10 },
-                uGlitchIntensity: { value: 0.08 },
-                uGlitchFrequency: { value: 0 },
-                uRippleFrequency: { value: 0 },
-                uRippleSpeed: { value: 0 },
-                uRippleHeight: { value: 0 }
+                uColor: { value: new THREE.Color('#00ffff') }
             },
             vertexShader: `
                 #include <common>
                 #include <skinning_pars_vertex>
-
                 varying vec3 vNormal;
                 varying vec3 vWorldPosition;
-                varying float vRipple;
-
-                uniform float uTime;
-                uniform float uGlitchIntensity;
-                uniform float uGlitchFrequency;
-                uniform float uRippleFrequency;
-                uniform float uRippleSpeed;
-                uniform float uRippleHeight;
-
                 void main() {
                     #include <skinbase_vertex>
-                    
                     vec3 transformed = position;
                     #include <skinning_vertex>
-
-                    vec3 transformedNormal = vec3( normal );
+                    vec3 transformedNormal = normal;
                     #include <skinnormal_vertex>
                     vNormal = normalize( normalMatrix * transformedNormal );
-                    
-                    float ripple = sin(transformed.y * uRippleFrequency - uTime * uRippleSpeed);
-                    vRipple = ripple;
-                    transformed += transformedNormal * ripple * uRippleHeight;
-
-                    float glitchTime = floor(uTime * uGlitchFrequency);
-                    float noiseVal = fract(sin(dot(vec2(glitchTime, transformed.y * 0.1), vec2(12.9898,78.233))) * 43758.5453123);
-                    if (noiseVal > 0.75) {
-                        float r1 = fract(sin(dot(vec2(transformed.y, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
-                        float r2 = fract(sin(dot(vec2(transformed.x, uTime), vec2(12.9898,78.233))) * 43758.5453123) - 0.5;
-                        transformed.x += r1 * uGlitchIntensity;
-                        transformed.z += r2 * uGlitchIntensity;
-                    }
-
-                    vec4 mvPosition = vec4( transformed, 1.0 );
-                    #ifdef USE_INSTANCING
-                        mvPosition = instanceMatrix * mvPosition;
-                    #endif
-                    mvPosition = modelViewMatrix * mvPosition;
-                    gl_Position = projectionMatrix * mvPosition;
-                    
-                    vWorldPosition = (modelMatrix * vec4(transformed, 1.0)).xyz;
+                    vec4 worldPosition = modelMatrix * vec4( transformed, 1.0 );
+                    vWorldPosition = worldPosition.xyz;
+                    gl_Position = projectionMatrix * viewMatrix * worldPosition;
                 }
             `,
             fragmentShader: `
                 uniform float uTime;
                 uniform vec3 uColor;
-                uniform float uAlpha;
-                uniform float uFresnelPower;
-                uniform float uFresnelIntensity;
-                uniform float uScanlineFrequency;
-                uniform float uScanlineSpeed;
-
                 varying vec3 vNormal;
                 varying vec3 vWorldPosition;
-                varying float vRipple;
-
                 void main() {
                     vec3 viewDir = normalize(cameraPosition - vWorldPosition);
-                    float fresnel = pow(1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), uFresnelPower) * uFresnelIntensity;
+                    float fresnel = pow( 1.0 - max(dot(viewDir, normalize(vNormal)), 0.0), 2.0 );
+                    float scanline = sin(vWorldPosition.y * 50.0 - uTime * 10.0) * 0.5 + 0.5;
+                    scanline = smoothstep(0.4, 0.6, scanline);
                     
-                    float scanline = sin(vWorldPosition.y * uScanlineFrequency - uTime * uScanlineSpeed) * 0.5 + 0.5;
-                    scanline = pow(scanline, 1.5);
-
-                    float baseAlpha = 0.2;
-                    float holoAlpha = baseAlpha + (fresnel + scanline * 0.35 + vRipple * 0.1) * uAlpha;
+                    // Base glow + Fresnel edge glow + Scanlines
+                    vec3 color = uColor * (0.4 + fresnel * 2.0);
+                    float alpha = 0.5 + fresnel * 0.5 + scanline * 0.2;
                     
-                    vec3 finalColor = uColor + vec3(fresnel * 0.5);
-                    gl_FragColor = vec4(finalColor, clamp(holoAlpha, 0.0, 1.0));
+                    gl_FragColor = vec4(color, clamp(alpha, 0.0, 1.0));
                 }
             `,
             transparent: true,
-            depthWrite: false,
-            blending: THREE.AdditiveBlending,
             side: THREE.DoubleSide,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false,
             skinning: true 
         });
 
@@ -382,16 +341,29 @@
         let lastHandSeenTime = Date.now();
         let palmHoldStart = 0;
         
-        let holoEffectEnabled = localStorage.getItem('holo_enabled') === 'true';
+        let holoEffectEnabled = localStorage.getItem('holo_enabled') !== 'false'; // Defaults to true
         toggleHoloBtn.innerText = holoEffectEnabled ? "HOLO: ON" : "HOLO: OFF";
 
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
             const file = event.target.files[0];
             if (!file) return;
-            saveModelToDB(file.name, file);
-            const url = URL.createObjectURL(file);
-            loadCustomGLTF(url, file.name);
+            
+            // GLTF external file check
+            if (file.name.endsWith('.gltf')) {
+                showModal("Warning: Importing .gltf files may fail if they rely on external .bin or texture files. Please use .glb (binary) format for best results.", [
+                    { text: "Continue Anyway", color: "cyan", onClick: () => {
+                        saveModelToDB(file.name, file, { size: (file.size / 1024 / 1024).toFixed(2) + 'MB', tris: '...', anims: '...' });
+                        const url = URL.createObjectURL(file);
+                        loadCustomGLTF(url, file.name);
+                    }},
+                    { text: "Cancel" }
+                ]);
+            } else {
+                saveModelToDB(file.name, file, { size: (file.size / 1024 / 1024).toFixed(2) + 'MB', tris: '...', anims: '...' });
+                const url = URL.createObjectURL(file);
+                loadCustomGLTF(url, file.name);
+            }
         });
 
         toggleHoloBtn.onclick = () => {
@@ -432,6 +404,22 @@
             });
         }
 
+        // Phase 2: Automatic Model Analysis
+        function analyzeModel(gltf) {
+            let meshes = 0, triangles = 0;
+            gltf.scene.traverse(child => {
+                if (child.isMesh) {
+                    meshes++;
+                    if (child.geometry && child.geometry.index) {
+                        triangles += child.geometry.index.count / 3;
+                    } else if (child.geometry && child.geometry.attributes.position) {
+                        triangles += child.geometry.attributes.position.count / 3;
+                    }
+                }
+            });
+            return { meshes, triangles: Math.round(triangles), anims: gltf.animations.length };
+        }
+
         function loadCustomGLTF(url, name) {
             if (activeObjectURL) URL.revokeObjectURL(activeObjectURL);
             activeObjectURL = url;
@@ -461,8 +449,6 @@
                 activeMesh.position.x = -center.x * baseScale;
                 activeMesh.position.y = -center.y * baseScale;
                 activeMesh.position.z = -center.z * baseScale;
-                
-                // FIX: Reverted forced rotation. Models will load in their default, correct orientation.
                 
                 holoPivot.add(activeMesh);
                 
@@ -499,13 +485,36 @@
                     isCustomModelLoaded = true;
                 }
 
+                // Update metadata in DB
+                const stats = analyzeModel(gltf);
+                const meta = { 
+                    size: (activeObjectURL ? 'Cached' : 'Unknown'), 
+                    tris: stats.triangles.toLocaleString(), 
+                    anims: stats.anims 
+                };
+                // We can't easily get file size back here, so we just update tris and anims
+                // For simplicity, we just re-save the metadata
+                if (db) {
+                    const tx = db.transaction('models', 'readwrite');
+                    const store = tx.objectStore('models');
+                    const getReq = store.get(name);
+                    getReq.onsuccess = (e) => {
+                        if (e.target.result) {
+                            const data = e.target.result;
+                            data.meta = meta;
+                            store.put(data);
+                            renderImportList();
+                        }
+                    };
+                }
+
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.import-item').forEach(btn => {
                     btn.classList.toggle('active', btn.innerText === name || name.includes(btn.innerText));
                 });
             }, undefined, (err) => {
                 console.error("GLTF Load Error:", err);
-                showModal("Failed to load model. The file may be corrupted or invalid.", [{text: "OK"}]);
+                showModal("Failed to load model. The file may be corrupted, or a .gltf file missing external assets.", [{text: "OK"}]);
             });
         }
 
@@ -675,9 +684,9 @@
                         gestureHud.innerText = "✋ | SWAP MODEL";
                         if (palmHoldStart === 0) palmHoldStart = Date.now();
                         if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
-                            if (cachedModelNames.length > 0) {
-                                currentCacheIndex = (currentCacheIndex + 1) % cachedModelNames.length;
-                                loadModelFromDB(cachedModelNames[currentCacheIndex]);
+                            if (cachedModelData.length > 0) {
+                                currentCacheIndex = (currentCacheIndex + 1) % cachedModelData.length;
+                                loadModelFromDB(cachedModelData[currentCacheIndex].name);
                             } else {
                                 selectShape((currentShapeIndex + 1) % geometries.length);
                             }
