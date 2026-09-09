@@ -8,7 +8,7 @@
         body { margin: 0; background: #05050a; overflow: hidden; font-family: 'Segoe UI', sans-serif; color: white; }
         #video { position: absolute; top: 0; left: 0; width: 1px; height: 1px; opacity: 0; pointer-events: none; z-index: -1; }
         #overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 3; pointer-events: none; transform: scaleX(-1); }
-        #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
+        #three-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 2; touch-action: none; }
         
         .clip-corner { clip-path: polygon(15px 0, 100% 0, 100% calc(100% - 15px), calc(100% - 15px) 100%, 0 100%, 0 15px); }
 
@@ -47,6 +47,9 @@
         .anim-btn { display: block; width: 100%; box-sizing: border-box; text-align: left; background: transparent; border: 1px solid rgba(0, 255, 255, 0.2); color: #00ffff; padding: 5px 8px; font-size: 9px; margin-bottom: 5px; cursor: pointer; transition: 0.2s; }
         .anim-btn:hover { background: rgba(0, 255, 255, 0.1); }
         .anim-btn.active { background: rgba(0, 255, 255, 0.3); border-color: #00ffff; }
+
+        /* Phase 2: Contextual HUD */
+        #gesture-hud { position: absolute; top: 70px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); padding: 5px 15px; border-radius: 15px; font-size: 12px; color: #00ffff; z-index: 10; pointer-events: none; border: 1px solid rgba(0, 255, 255, 0.3); backdrop-filter: blur(5px); display: none; }
     </style>
 </head>
 <body>
@@ -62,6 +65,8 @@
     <video id="video" autoplay playsinline muted></video>
     <canvas id="overlay-canvas"></canvas>
     <canvas id="three-canvas"></canvas>
+
+    <div id="gesture-hud">WAITING FOR HANDS</div>
 
     <div id="top-bar">
         <div id="catalog-bar" class="clip-corner">
@@ -118,6 +123,7 @@
         const animDebug = document.getElementById('anim-debug');
         const animList = document.getElementById('anim-list');
         const toggleHoloBtn = document.getElementById('toggle-holo-btn');
+        const gestureHud = document.getElementById('gesture-hud');
 
         const icons = { idle: document.getElementById('icon-idle'), scale: document.getElementById('icon-scale'), rotate: document.getElementById('icon-rotate') };
         function setActiveIcon(name) {
@@ -258,7 +264,7 @@
         holoPivot.position.y = 1.0;
         scene.add(holoPivot);
 
-        // --- FIXED HOLOGRAPHIC SHADER (Audit #7: Skinning Normals Fixed Correctly) ---
+        // --- FIXED HOLOGRAPHIC SHADER ---
         const holoMaterial = new THREE.ShaderMaterial({
             uniforms: {
                 uTime: { value: 0 },
@@ -295,14 +301,12 @@
                     vec3 transformed = position;
                     #include <skinning_vertex>
 
-                    // Properly define and transform normals for skinning
                     vec3 transformedNormal = vec3( normal );
                     #include <skinnormal_vertex>
                     vNormal = normalize( normalMatrix * transformedNormal );
                     
                     float ripple = sin(transformed.y * uRippleFrequency - uTime * uRippleSpeed);
                     vRipple = ripple;
-                    // Use object space normal for displacement
                     transformed += transformedNormal * ripple * uRippleHeight;
 
                     float glitchTime = floor(uTime * uGlitchFrequency);
@@ -368,7 +372,7 @@
         let activeMesh = new THREE.Mesh(geometries[0], holoMaterial);
         holoPivot.add(activeMesh); 
 
-        // --- Animation State ---
+        // --- Animation & State ---
         let mixer = null;
         let animations = [];
         let currentAnimIndex = 0;
@@ -377,7 +381,10 @@
         let lastAnimSwitch = 0;
         let lastHandSeenTime = Date.now();
         let palmHoldStart = 0;
+        
+        // FIX: Load state from localStorage and set button text immediately
         let holoEffectEnabled = localStorage.getItem('holo_enabled') === 'true';
+        toggleHoloBtn.innerText = holoEffectEnabled ? "HOLO: ON" : "HOLO: OFF";
 
         const gltfLoader = new GLTFLoader();
         document.getElementById('file-input').addEventListener('change', (event) => {
@@ -388,7 +395,7 @@
             loadCustomGLTF(url, file.name);
         });
 
-        // Toggle Holo Effect Logic
+        // Toggle Holo Effect Logic (with needsUpdate fix for single-click swap)
         toggleHoloBtn.onclick = () => {
             if (!isCustomModelLoaded) {
                 showModal("Hologram toggle only applies to imported models.", [{text: "OK"}]);
@@ -401,6 +408,7 @@
             activeMesh.traverse((child) => {
                 if(child.isMesh && child.userData.originalMaterial) {
                     child.material = holoEffectEnabled ? holoMaterial : child.userData.originalMaterial;
+                    child.material.needsUpdate = true; // Forces Three.js to recompile shader instantly
                 }
             });
         };
@@ -410,13 +418,11 @@
             animDebug.style.display = 'none';
         }
 
-        // Audit #6: Proper GPU Disposal
         function disposeHierarchy(node) {
             if (!node) return;
             node.traverse(child => {
                 if (child.isMesh) {
                     if (child.geometry) child.geometry.dispose();
-                    // Dispose original materials, but NEVER dispose the shared holoMaterial
                     if (child.userData.originalMaterial) {
                         if (Array.isArray(child.userData.originalMaterial)) {
                             child.userData.originalMaterial.forEach(m => m.dispose());
@@ -443,7 +449,7 @@
                 activeMesh.traverse((child) => { 
                     if(child.isMesh) {
                         child.userData.originalMaterial = child.material;
-                        child.material = holoMaterial; 
+                        if (holoEffectEnabled) child.material = holoMaterial; 
                     }
                 });
                 
@@ -457,6 +463,9 @@
                 activeMesh.position.x = -center.x * baseScale;
                 activeMesh.position.y = -center.y * baseScale;
                 activeMesh.position.z = -center.z * baseScale;
+                
+                // FIX: Force model to face the player
+                activeMesh.rotation.y = Math.PI;
                 
                 holoPivot.add(activeMesh);
                 
@@ -492,8 +501,6 @@
                     mixer = null;
                     isCustomModelLoaded = true;
                 }
-
-                toggleHoloBtn.innerText = holoEffectEnabled ? "HOLO: ON" : "HOLO: OFF";
 
                 document.querySelectorAll('.catalog-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelectorAll('.import-item').forEach(btn => {
@@ -574,6 +581,7 @@
                 video.srcObject = stream;
                 await video.play();
                 loader.style.display = 'none';
+                gestureHud.style.display = 'block';
                 processFrame();
             } catch (err) { 
                 console.error("Camera error:", err);
@@ -613,6 +621,7 @@
 
                     if (h1Fist || h2Fist) {
                         setActiveIcon("rotate");
+                        gestureHud.innerText = "✊ + ✋ | ROTATE";
                         scaleModeActive = false; 
                         const rotHand = h1Fist ? h2 : h1;
                         
@@ -626,8 +635,8 @@
                                 rotBaselineHandX = handX; rotBaselineHandY = handY; rotBaselineHandAngle = handAngle;
                                 rotBaselineModelX = holoPivot.rotation.x; rotBaselineModelY = holoPivot.rotation.y; rotBaselineModelZ = holoPivot.rotation.z;
                             } else {
-                                const isHumanoid = isCustomModelLoaded && animations.length > 0;
-                                if (isHumanoid) {
+                                // FIX: Apply Y-axis only restriction to ALL imported models (handles T-Poses safely)
+                                if (isCustomModelLoaded) {
                                     targetRotY = rotBaselineModelY - (handX - rotBaselineHandX) * Math.PI * 3;
                                     targetRotX = rotBaselineModelX; 
                                     targetRotZ = rotBaselineModelZ; 
@@ -640,6 +649,7 @@
                         }
                     } else {
                         setActiveIcon("scale");
+                        gestureHud.innerText = "✋ + ✋ | SCALE";
                         rotModeActive = false; 
                         const wrist1 = h1[0], wrist2 = h2[0];
                         const dist = Math.hypot(wrist1.x - wrist2.x, wrist1.y - wrist2.y, wrist1.z - wrist2.z);
@@ -657,6 +667,7 @@
                     const hand = handsArr[0];
                     
                     if (isPeace(hand)) {
+                        gestureHud.innerText = "✌️ | NEXT ANIMATION";
                         const now = Date.now();
                         if (now - lastAnimSwitch > 1000) { 
                             if (isCustomModelLoaded && animations.length > 0) {
@@ -665,6 +676,7 @@
                             }
                         }
                     } else if (isPalm(hand)) {
+                        gestureHud.innerText = "✋ | SWAP MODEL";
                         if (palmHoldStart === 0) palmHoldStart = Date.now();
                         if ((Date.now() - palmHoldStart) / 1000 > 1.5) {
                             if (cachedModelNames.length > 0) {
@@ -676,10 +688,12 @@
                             palmHoldStart = 0; 
                         }
                     } else {
+                        gestureHud.innerText = "1 HAND DETECTED";
                         palmHoldStart = 0;
                     }
                 }
             } else {
+                gestureHud.innerText = "SHOW HANDS TO CONTROL";
                 palmHoldStart = 0;
                 scaleModeActive = false; rotModeActive = false; setActiveIcon("idle");
                 
@@ -689,6 +703,42 @@
                 }
             }
         }
+
+        // Phase 2: Manual Touch Fallback (Drag to rotate)
+        let isDragging = false;
+        let previousTouchX = 0;
+        let previousTouchY = 0;
+
+        function onPointerDown(e) {
+            isDragging = true;
+            previousTouchX = e.clientX || (e.touches && e.touches[0].clientX);
+            previousTouchY = e.clientY || (e.touches && e.touches[0].clientY);
+        }
+        function onPointerMove(e) {
+            if (!isDragging) return;
+            const currentX = e.clientX || (e.touches && e.touches[0].clientX);
+            const currentY = e.clientY || (e.touches && e.touches[0].clientY);
+            const deltaX = currentX - previousTouchX;
+            const deltaY = currentY - previousTouchY;
+            
+            if (isCustomModelLoaded) {
+                targetRotY += deltaX * 0.01;
+            } else {
+                targetRotY += deltaX * 0.01;
+                targetRotX += deltaY * 0.01;
+            }
+            
+            previousTouchX = currentX;
+            previousTouchY = currentY;
+        }
+        function onPointerUp() { isDragging = false; }
+
+        threeCanvas.addEventListener('mousedown', onPointerDown);
+        threeCanvas.addEventListener('touchstart', onPointerDown, {passive: true});
+        window.addEventListener('mousemove', onPointerMove);
+        window.addEventListener('touchmove', onPointerMove, {passive: true});
+        window.addEventListener('mouseup', onPointerUp);
+        window.addEventListener('touchend', onPointerUp);
 
         const clock = new THREE.Clock();
         const targetScaleVector = new THREE.Vector3(); 
